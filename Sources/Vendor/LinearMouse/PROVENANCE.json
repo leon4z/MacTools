@@ -1,0 +1,50 @@
+{
+  "repository": "https://github.com/linearmouse/linearmouse",
+  "tag": "v0.11.4",
+  "commit": "df23b547ea0821c729eae1e6055bf3a018ab6b4f",
+  "license": "MIT",
+  "files": [
+    {
+      "file": "SmoothedScrollingEngine.swift",
+      "upstream_path": "LinearMouse/EventTransformer/SmoothedScrollingEngine.swift",
+      "upstream_sha256": "5a0d7fc06123a08670ff8b92e3b0cade117fbe63ddd3e72068a438eb45575975",
+      "local_sha256": "5a0d7fc06123a08670ff8b92e3b0cade117fbe63ddd3e72068a438eb45575975",
+      "unchanged": true
+    },
+    {
+      "file": "Smoothed.swift",
+      "upstream_path": "LinearMouse/Model/Configuration/Scheme/Scrolling/Smoothed.swift",
+      "upstream_sha256": "e0d8044b0199a80fbf91b35ccacf64a2f4db5d4a425a366ec7d29b0e02a8197e",
+      "local_sha256": "e0d8044b0199a80fbf91b35ccacf64a2f4db5d4a425a366ec7d29b0e02a8197e",
+      "unchanged": true
+    },
+    {
+      "file": "Bidirectional.swift",
+      "upstream_path": "Bidirectional.swift",
+      "upstream_sha256": "fb8177d3cf461b1b8dbb132383a43c5e8e8871a4cdd4a0dbe8ee73bf5a9d28fe",
+      "local_sha256": "fb8177d3cf461b1b8dbb132383a43c5e8e8871a4cdd4a0dbe8ee73bf5a9d28fe",
+      "unchanged": true
+    },
+    {
+      "file": "EventThread.swift",
+      "upstream_path": "LinearMouse/EventTap/EventThread.swift",
+      "upstream_sha256": "d08b07088972548241e8e02373585ea497f1d2162b9361bb30f64eb9ea77a46d",
+      "local_sha256": "40f9b8652cce83a3823d243aa539d95d6d881e1c13c4fd140d8e2be82f8f73a9",
+      "unchanged": false
+    },
+    {
+      "file": "ScrollWheelEventView.swift",
+      "upstream_path": "LinearMouse/EventView/ScrollWheelEventView.swift",
+      "upstream_sha256": "76f0ec05b64680626634e809489a642a16e521c482b1a82f92b5249d3e74e168",
+      "local_sha256": "e4c5d080e656856f11aa80938020f6e96c5007784f653b839cd200a3be3a51bd",
+      "unchanged": false
+    },
+    {
+      "file": "LICENSE",
+      "upstream_path": "LICENSE",
+      "upstream_sha256": "8a201cf31fef52039f4adce3324fd55835118b564ed373fd74b0f2a05da2de8c",
+      "local_sha256": "8a201cf31fef52039f4adce3324fd55835118b564ed373fd74b0f2a05da2de8c",
+      "unchanged": true
+    }
+  ]
+}

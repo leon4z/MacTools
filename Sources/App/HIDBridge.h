@@ -1,0 +1,41 @@
+#include <IOKit/hidsystem/IOHIDEventSystemClient.h>
+#include <IOKit/hidsystem/IOHIDServiceClient.h>
+
+// LinearMouse v0.11.4 MIT: scroll backing-event declarations.
+
+#include <CoreGraphics/CoreGraphics.h>
+CF_IMPLICIT_BRIDGING_ENABLED
+
+enum {
+    kIOHIDEventTypeNULL,
+    kIOHIDEventTypeVendorDefined,
+    kIOHIDEventTypeKeyboard = 3,
+    kIOHIDEventTypeRotation = 5,
+    kIOHIDEventTypeScroll = 6,
+    kIOHIDEventTypeZoom = 8,
+    kIOHIDEventTypeDigitizer = 11,
+    kIOHIDEventTypeNavigationSwipe = 16,
+    kIOHIDEventTypeForce = 32,
+};
+typedef uint32_t IOHIDEventType;
+typedef CFTypeRef IOHIDEventRef;
+typedef double IOHIDFloat;
+typedef uint32_t IOHIDEventField;
+
+#define IOHIDEventFieldBase(type) (type << 16)
+
+#define kIOHIDEventFieldScrollBase IOHIDEventFieldBase(kIOHIDEventTypeScroll)
+static const IOHIDEventField kIOHIDEventFieldScrollX = (kIOHIDEventFieldScrollBase | 0);
+static const IOHIDEventField kIOHIDEventFieldScrollY = (kIOHIDEventFieldScrollBase | 1);
+
+IOHIDEventRef CGEventCopyIOHIDEvent(CGEventRef);
+IOHIDEventType IOHIDEventGetType(IOHIDEventRef);
+IOHIDFloat IOHIDEventGetFloatValue(IOHIDEventRef, IOHIDEventField);
+void IOHIDEventSetFloatValue(IOHIDEventRef, IOHIDEventField, IOHIDFloat);
+
+CF_IMPLICIT_BRIDGING_DISABLED
+
+// LinearMouse PointerDeviceManager uses the full client, not SimpleClient.
+CF_IMPLICIT_BRIDGING_ENABLED
+IOHIDEventSystemClientRef IOHIDEventSystemClientCreate(CFAllocatorRef);
+CF_IMPLICIT_BRIDGING_DISABLED

@@ -1,0 +1,22 @@
+name: macOS validation
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  pull_request:
+permissions:
+  contents: read
+jobs:
+  validate:
+    runs-on: macos-26
+    timeout-minutes: 20
+    steps:
+      - uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+      - name: Test
+        run: bash scripts/test.sh
+      - name: Development build
+        env:
+          MACTOOLS_SIGNING_IDENTITY: "-"
+        run: bash scripts/build.sh
+      - name: Verify bundle
+        run: codesign --verify --deep --strict build/MacTools.app

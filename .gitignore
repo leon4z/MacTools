@@ -1,0 +1,20 @@
+# Publish only these source paths. Local settings, history and keys stay private.
+/*
+!/.gitignore
+!/README.md
+!/LICENSE
+!/THIRD_PARTY_NOTICES.md
+!/OPEN_SOURCE_REFERENCES.md
+!/Sources/
+!/Resources/
+!/Tests/
+!/scripts/
+!/docs/
+/docs/*
+!/docs/releasing.md
+!/.github/
+**/.DS_Store
+**/*.p12
+**/*.pfx
+**/*.key
+**/*.pem

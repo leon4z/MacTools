@@ -1,0 +1,626 @@
+// MIT License
+// Copyright (c) 2021-2026 LinearMouse
+
+import CoreGraphics
+import Foundation
+
+final class SmoothedScrollingEngine {
+    enum Phase {
+        case touchBegan
+        case touchChanged
+        case touchEnded
+        case momentumBegan
+        case momentumChanged
+        case momentumEnded
+    }
+
+    enum Axis {
+        case horizontal
+        case vertical
+    }
+
+    enum InputKind {
+        case wheel
+        case continuousGesture
+    }
+
+    struct Emission {
+        var deltaX: Double
+        var deltaY: Double
+        var phase: Phase
+    }
+
+    private enum SessionState {
+        case idle
+        case touching
+        case momentum
+    }
+
+    private enum AxisBehavior {
+        case passthrough
+        case smoothed(AxisTuning)
+    }
+
+    private struct AxisTuning {
+        private static let legacyUpperBound = 3.0
+
+        let configuration: Scheme.Scrolling.Smoothed
+
+        init(configuration: Scheme.Scrolling.Smoothed) {
+            self.configuration = configuration
+        }
+
+        private var presetProfile: Scheme.Scrolling.Smoothed.PresetProfile {
+            configuration.resolvedPresetProfile
+        }
+
+        private var response: Double {
+            (configuration.response?.asTruncatedDouble ?? 0.45)
+                .clamped(to: Scheme.Scrolling.Smoothed.responseRange)
+        }
+
+        private var speed: Double {
+            (configuration.speed?.asTruncatedDouble ?? 1)
+                .clamped(to: Scheme.Scrolling.Smoothed.speedRange)
+        }
+
+        private var acceleration: Double {
+            (configuration.acceleration?.asTruncatedDouble ?? 1.2)
+                .clamped(to: Scheme.Scrolling.Smoothed.accelerationRange)
+        }
+
+        private var inertia: Double {
+            (configuration.inertia?.asTruncatedDouble ?? 0.65)
+                .clamped(to: Scheme.Scrolling.Smoothed.inertiaRange)
+        }
+
+        func desiredVelocity(for input: Double) -> Double {
+            guard input != 0 else {
+                return 0
+            }
+
+            let profile = presetProfile
+            let baseMagnitude = abs(input)
+            let normalizedMagnitude = (baseMagnitude / (baseMagnitude + 24)).clamped(to: 0 ... 1)
+            let curvedMagnitude = pow(normalizedMagnitude, profile.inputExponent)
+            let magnitude = baseMagnitude * curvedMagnitude
+            let speedBoost = 0.85 + speed * 0.4
+            let accelerationBoost = 1 + acceleration * profile.accelerationGain
+            let velocity = magnitude * profile.velocityScale * speedBoost * accelerationBoost
+
+            return input.sign == .minus ? -velocity : velocity
+        }
+
+        private func reengagementDominance(inputVelocity: Double, currentVelocity: Double) -> Double {
+            let inputMagnitude = abs(inputVelocity)
+            let currentMagnitude = abs(currentVelocity)
+
+            guard inputMagnitude > 0, currentMagnitude > 0 else {
+                return 0
+            }
+
+            return (currentMagnitude / inputMagnitude).clamped(to: 0 ... 1)
+        }
+
+        private func tailRecovery(inputVelocity: Double, currentVelocity: Double) -> Double {
+            let dominance = reengagementDominance(inputVelocity: inputVelocity, currentVelocity: currentVelocity)
+            return ((0.75 - dominance) / 0.75).clamped(to: 0 ... 1)
+        }
+
+        func reengagedDesiredVelocity(for input: Double, currentVelocity: Double) -> Double {
+            let inputVelocity = desiredVelocity(for: input)
+
+            guard currentVelocity != 0 else {
+                return inputVelocity
+            }
+
+            let sameDirection = inputVelocity.sign == currentVelocity.sign
+            if sameDirection {
+                let carryFactor = (0.06 + response * 0.06 + acceleration * 0.01).clamped(to: 0.06 ... 0.16)
+                let ceilingFactor = (1.01 + presetProfile.response * 0.08 + response * 0.06).clamped(to: 1.02 ... 1.12)
+                let carriedMagnitude = min(
+                    abs(currentVelocity) + abs(inputVelocity) * carryFactor,
+                    max(abs(currentVelocity), abs(inputVelocity)) * ceilingFactor
+                )
+                let recovery = pow(tailRecovery(inputVelocity: inputVelocity, currentVelocity: currentVelocity), 0.8)
+                let targetMagnitude = carriedMagnitude + (abs(inputVelocity) - carriedMagnitude) * recovery
+                return currentVelocity.sign == .minus ? -targetMagnitude : targetMagnitude
+            }
+
+            let brakingBlend = (0.50 + response * 0.20).clamped(to: 0.50 ... 0.82)
+            return currentVelocity + (inputVelocity - currentVelocity) * brakingBlend
+        }
+
+        func residualInputAfterCancellingMomentum(input: Double, currentVelocity: Double) -> Double {
+            let inputVelocity = desiredVelocity(for: input)
+            let inputMagnitude = abs(inputVelocity)
+            let currentMagnitude = abs(currentVelocity)
+
+            guard inputMagnitude > currentMagnitude else {
+                return 0
+            }
+
+            let residualFraction = ((inputMagnitude - currentMagnitude) / inputMagnitude).clamped(to: 0 ... 1)
+            return input * residualFraction
+        }
+
+        func blendFactor(for dt: TimeInterval) -> Double {
+            let scaled = presetProfile.response * 0.75 + response * 0.8
+            return (scaled * dt * 60).clamped(to: 0.0 ... 1.0)
+        }
+
+        func reengagementBlendFactor(for dt: TimeInterval, desiredVelocity: Double, currentVelocity: Double) -> Double {
+            let baseBlend = blendFactor(for: dt)
+            let softenedBlend = (baseBlend * (0.10 + response * 0.08)).clamped(to: 0.0 ... 0.12)
+            let recovery = pow(tailRecovery(inputVelocity: desiredVelocity, currentVelocity: currentVelocity), 0.55)
+            return (softenedBlend + (baseBlend - softenedBlend) * recovery).clamped(to: softenedBlend ... baseBlend)
+        }
+
+        func reengagementKickFactor(desiredVelocity: Double, currentVelocity: Double) -> Double {
+            guard desiredVelocity != 0, currentVelocity != 0, desiredVelocity.sign == currentVelocity.sign else {
+                return 0
+            }
+
+            let recovery = pow(tailRecovery(inputVelocity: desiredVelocity, currentVelocity: currentVelocity), 0.8)
+            let baseKick = (0.04 + response * 0.04).clamped(to: 0.04 ... 0.08)
+            let tailKick = (0.14 + response * 0.05 + acceleration * 0.02).clamped(to: 0.14 ... 0.28)
+            return (baseKick + tailKick * recovery).clamped(to: 0.04 ... 0.24)
+        }
+
+        func momentumDecay(for dt: TimeInterval) -> Double {
+            let profile = presetProfile
+            let legacyInertiaBoost = ((min(inertia, Self.legacyUpperBound) - 0.65) * 0.05)
+                .clamped(to: -0.08 ... 0.10)
+            let extendedInertiaBoost = max(inertia - Self.legacyUpperBound, 0) * 0.01
+            let decayCeiling = inertia > Self.legacyUpperBound ? 0.99 : 0.98
+            let dtScale = max(dt * 60, 0.25)
+            let decay = (profile.decay + legacyInertiaBoost + extendedInertiaBoost)
+                .clamped(to: 0.72 ... decayCeiling)
+            return pow(decay, dtScale)
+        }
+    }
+
+    private let horizontalBehavior: AxisBehavior
+    private let verticalBehavior: AxisBehavior
+
+    private var sessionState: SessionState = .idle
+    private var lastTickTimestamp: TimeInterval?
+    private var lastInputTimestamp: TimeInterval?
+    private var pendingInputX = 0.0
+    private var pendingInputY = 0.0
+    private var wheelInputVelocityEstimatorX = WheelInputVelocityEstimator()
+    private var wheelInputVelocityEstimatorY = WheelInputVelocityEstimator()
+    private var desiredVelocityX = 0.0
+    private var desiredVelocityY = 0.0
+    private var velocityX = 0.0
+    private var velocityY = 0.0
+    private var touchHasBegun = false
+    private var pendingMomentumBegin = false
+    private var reengagedFromMomentum = false
+
+    private let inputGrace: TimeInterval = 1.0 / 25.0
+    private let stopThreshold = 0.5
+    private let axisActivityThreshold = 0.01
+
+    init(smoothed: Scheme.Scrolling.Bidirectional<Scheme.Scrolling.Smoothed>) {
+        horizontalBehavior = smoothed.horizontal.map { .smoothed(.init(configuration: $0)) } ?? .passthrough
+        verticalBehavior = smoothed.vertical.map { .smoothed(.init(configuration: $0)) } ?? .passthrough
+    }
+
+    var isRunning: Bool {
+        switch sessionState {
+        case .idle:
+            return pendingInputX != 0 || pendingInputY != 0
+        case .touching, .momentum:
+            return true
+        }
+    }
+
+    var exclusiveActiveAxis: Axis? {
+        let horizontalActive = axisIsActive(
+            pendingInput: pendingInputX,
+            desiredVelocity: desiredVelocityX,
+            velocity: velocityX
+        )
+        let verticalActive = axisIsActive(
+            pendingInput: pendingInputY,
+            desiredVelocity: desiredVelocityY,
+            velocity: velocityY
+        )
+
+        switch (horizontalActive, verticalActive) {
+        case (true, false):
+            return .horizontal
+        case (false, true):
+            return .vertical
+        default:
+            return nil
+        }
+    }
+
+    func resetOtherAxis(ifExclusiveIncomingAxis incomingAxis: Axis) {
+        guard let activeAxis = exclusiveActiveAxis,
+              activeAxis != incomingAxis else {
+            return
+        }
+
+        switch activeAxis {
+        case .horizontal:
+            pendingInputX = 0
+            wheelInputVelocityEstimatorX.reset()
+            desiredVelocityX = 0
+            velocityX = 0
+        case .vertical:
+            pendingInputY = 0
+            wheelInputVelocityEstimatorY.reset()
+            desiredVelocityY = 0
+            velocityY = 0
+        }
+
+        if abs(velocityX) <= stopThreshold,
+           abs(velocityY) <= stopThreshold,
+           pendingInputX == 0,
+           pendingInputY == 0 {
+            pendingMomentumBegin = false
+            reengagedFromMomentum = false
+            if sessionState == .momentum {
+                sessionState = .idle
+                touchHasBegun = false
+            }
+        }
+    }
+
+    func feed(
+        deltaX rawDeltaX: Double,
+        deltaY rawDeltaY: Double,
+        timestamp: TimeInterval,
+        inputKind: InputKind = .wheel
+    ) {
+        var deltaX = rawDeltaX
+        var deltaY = rawDeltaY
+
+        if sessionState == .momentum {
+            cancelOpposingMomentum(deltaX: &deltaX, deltaY: &deltaY)
+        }
+
+        pendingInputX += deltaX
+        pendingInputY += deltaY
+        updateWheelInputVelocityEstimator(deltaX: deltaX, deltaY: deltaY, timestamp: timestamp, inputKind: inputKind)
+        lastInputTimestamp = timestamp
+
+        if sessionState == .idle, deltaX != 0 || deltaY != 0 {
+            sessionState = .touching
+            touchHasBegun = false
+            pendingMomentumBegin = false
+            lastTickTimestamp = timestamp
+        } else if sessionState == .momentum, deltaX != 0 || deltaY != 0 {
+            sessionState = .touching
+            touchHasBegun = false
+            pendingMomentumBegin = false
+            reengagedFromMomentum = true
+        }
+
+        if lastTickTimestamp == nil {
+            lastTickTimestamp = timestamp
+        }
+    }
+
+    private func cancelOpposingMomentum(deltaX: inout Double, deltaY: inout Double) {
+        cancelOpposingMomentum(
+            delta: &deltaX,
+            behavior: horizontalBehavior,
+            desiredVelocity: &desiredVelocityX,
+            velocity: &velocityX
+        )
+        cancelOpposingMomentum(
+            delta: &deltaY,
+            behavior: verticalBehavior,
+            desiredVelocity: &desiredVelocityY,
+            velocity: &velocityY
+        )
+    }
+
+    private func cancelOpposingMomentum(
+        delta: inout Double,
+        behavior: AxisBehavior,
+        desiredVelocity: inout Double,
+        velocity: inout Double
+    ) {
+        guard opposesMomentum(input: delta, velocity: velocity) else {
+            return
+        }
+
+        let residualInput: Double
+        switch behavior {
+        case .passthrough:
+            residualInput = delta
+        case let .smoothed(tuning):
+            residualInput = tuning.residualInputAfterCancellingMomentum(input: delta, currentVelocity: velocity)
+        }
+
+        desiredVelocity = 0
+        velocity = 0
+        delta = residualInput
+    }
+
+    private func opposesMomentum(input: Double, velocity: Double) -> Bool {
+        input != 0 && velocity != 0 && input.sign != velocity.sign
+    }
+
+    private func updateWheelInputVelocityEstimator(
+        deltaX: Double,
+        deltaY: Double,
+        timestamp: TimeInterval,
+        inputKind: InputKind
+    ) {
+        switch inputKind {
+        case .wheel:
+            wheelInputVelocityEstimatorX.add(deltaX, timestamp: timestamp)
+            wheelInputVelocityEstimatorY.add(deltaY, timestamp: timestamp)
+        case .continuousGesture:
+            if deltaX != 0 {
+                wheelInputVelocityEstimatorX.reset()
+            }
+            if deltaY != 0 {
+                wheelInputVelocityEstimatorY.reset()
+            }
+        }
+    }
+
+    func advance(to timestamp: TimeInterval) -> Emission? {
+        let previousTick = lastTickTimestamp ?? timestamp
+        let dt = (timestamp - previousTick).clamped(to: 1.0 / 240.0 ... 1.0 / 24.0)
+        lastTickTimestamp = timestamp
+
+        let hasPendingInput = pendingInputX != 0 || pendingInputY != 0
+        let hasFreshInput = lastInputTimestamp.map { timestamp - $0 <= inputGrace } ?? false
+        let shouldBlendMomentumReengagement = reengagedFromMomentum && hasPendingInput
+        let effectiveInputX = wheelInputVelocityEstimatorX.projectedInput(for: pendingInputX, at: timestamp)
+        let effectiveInputY = wheelInputVelocityEstimatorY.projectedInput(for: pendingInputY, at: timestamp)
+
+        let emissionX = advanceAxis(
+            behavior: horizontalBehavior,
+            pendingInput: &pendingInputX,
+            effectiveInput: effectiveInputX,
+            desiredVelocity: &desiredVelocityX,
+            velocity: &velocityX,
+            hasPendingInput: hasPendingInput,
+            hasFreshInput: hasFreshInput,
+            reengagedFromMomentum: shouldBlendMomentumReengagement,
+            dt: dt
+        )
+        let emissionY = advanceAxis(
+            behavior: verticalBehavior,
+            pendingInput: &pendingInputY,
+            effectiveInput: effectiveInputY,
+            desiredVelocity: &desiredVelocityY,
+            velocity: &velocityY,
+            hasPendingInput: hasPendingInput,
+            hasFreshInput: hasFreshInput,
+            reengagedFromMomentum: shouldBlendMomentumReengagement,
+            dt: dt
+        )
+        reengagedFromMomentum = false
+
+        let hasMovement = abs(emissionX) >= 0.01 || abs(emissionY) >= 0.01
+        let shouldContinueMomentum = abs(velocityX) > stopThreshold || abs(velocityY) > stopThreshold
+
+        switch sessionState {
+        case .idle:
+            return nil
+
+        case .touching:
+            if hasFreshInput {
+                guard hasMovement else {
+                    return nil
+                }
+
+                let phase: CGScrollPhase = touchHasBegun ? .changed : .began
+                touchHasBegun = true
+                return .init(
+                    deltaX: emissionX,
+                    deltaY: emissionY,
+                    phase: phase == .began ? .touchBegan : .touchChanged
+                )
+            }
+
+            if shouldContinueMomentum {
+                sessionState = .momentum
+                pendingMomentumBegin = true
+                touchHasBegun = false
+                wheelInputVelocityEstimatorX.reset()
+                wheelInputVelocityEstimatorY.reset()
+                return .init(deltaX: 0, deltaY: 0, phase: .touchEnded)
+            }
+
+            sessionState = .idle
+            wheelInputVelocityEstimatorX.reset()
+            wheelInputVelocityEstimatorY.reset()
+            velocityX = 0
+            velocityY = 0
+            desiredVelocityX = 0
+            desiredVelocityY = 0
+            touchHasBegun = false
+            return .init(deltaX: emissionX, deltaY: emissionY, phase: .touchEnded)
+
+        case .momentum:
+            guard hasMovement || shouldContinueMomentum else {
+                sessionState = .idle
+                wheelInputVelocityEstimatorX.reset()
+                wheelInputVelocityEstimatorY.reset()
+                velocityX = 0
+                velocityY = 0
+                desiredVelocityX = 0
+                desiredVelocityY = 0
+                touchHasBegun = false
+                pendingMomentumBegin = false
+                return .init(deltaX: 0, deltaY: 0, phase: .momentumEnded)
+            }
+
+            if pendingMomentumBegin {
+                pendingMomentumBegin = false
+                return .init(deltaX: emissionX, deltaY: emissionY, phase: .momentumBegan)
+            }
+
+            return .init(deltaX: emissionX, deltaY: emissionY, phase: .momentumChanged)
+        }
+    }
+
+    private func advanceAxis(
+        behavior: AxisBehavior,
+        pendingInput: inout Double,
+        effectiveInput: Double,
+        desiredVelocity: inout Double,
+        velocity: inout Double,
+        hasPendingInput: Bool,
+        hasFreshInput: Bool,
+        reengagedFromMomentum: Bool,
+        dt: TimeInterval
+    ) -> Double {
+        switch behavior {
+        case .passthrough:
+            defer {
+                pendingInput = 0
+            }
+            return pendingInput
+
+        case let .smoothed(tuning):
+            if pendingInput != 0 {
+                desiredVelocity = reengagedFromMomentum
+                    ? tuning.reengagedDesiredVelocity(for: effectiveInput, currentVelocity: velocity)
+                    : tuning.desiredVelocity(for: effectiveInput)
+                if reengagedFromMomentum {
+                    let kick = tuning.reengagementKickFactor(
+                        desiredVelocity: desiredVelocity,
+                        currentVelocity: velocity
+                    )
+                    velocity += (desiredVelocity - velocity) * kick
+                }
+                pendingInput = 0
+            }
+
+            if hasFreshInput || hasPendingInput {
+                let blend = reengagedFromMomentum
+                    ? tuning.reengagementBlendFactor(
+                        for: dt,
+                        desiredVelocity: desiredVelocity,
+                        currentVelocity: velocity
+                    )
+                    : tuning.blendFactor(for: dt)
+                velocity += (desiredVelocity - velocity) * blend
+            } else {
+                velocity *= tuning.momentumDecay(for: dt)
+            }
+
+            return velocity * dt
+        }
+    }
+
+    private func axisIsActive(pendingInput: Double, desiredVelocity: Double, velocity: Double) -> Bool {
+        abs(pendingInput) >= axisActivityThreshold
+            || abs(desiredVelocity) >= axisActivityThreshold
+            || abs(velocity) >= axisActivityThreshold
+    }
+}
+
+private struct WheelInputVelocityEstimator {
+    // Estimate the distance represented by a short wheel gesture while capping
+    // the projection to the signed input that was actually received.
+    private static let inputGapResetInterval: TimeInterval = 1.0 / 25.0
+    private static let rateSmoothingTimeConstant: TimeInterval = 1.0 / 20.0
+    private static let projectedGestureInterval: TimeInterval = 1.0 / 15.0
+    private static let recentInputLimitInterval = inputGapResetInterval * 4
+
+    private struct InputSample {
+        var delta: Double
+        var timestamp: TimeInterval
+    }
+
+    private var rateAdjustedInput = 0.0
+    private var direction = 0
+    private var lastTimestamp: TimeInterval?
+    private var recentInputs: [InputSample] = []
+
+    mutating func add(_ delta: Double, timestamp: TimeInterval) {
+        guard delta != 0 else {
+            return
+        }
+
+        advance(to: timestamp)
+        let currentDirection = delta > 0 ? 1 : -1
+        if direction != 0, currentDirection != direction {
+            rateAdjustedInput = 0
+            recentInputs.removeAll(keepingCapacity: true)
+        }
+
+        direction = currentDirection
+        rateAdjustedInput += delta * Self.projectedGestureInterval / Self.rateSmoothingTimeConstant
+        recentInputs.append(.init(delta: delta, timestamp: timestamp))
+    }
+
+    mutating func projectedInput(for pendingInput: Double, at timestamp: TimeInterval) -> Double {
+        guard pendingInput != 0 else {
+            advance(to: timestamp)
+            return 0
+        }
+
+        advance(to: timestamp)
+
+        var projectedInput = pendingInput
+        if rateAdjustedInput != 0,
+           rateAdjustedInput.sign == pendingInput.sign,
+           abs(rateAdjustedInput) > abs(projectedInput) {
+            projectedInput = rateAdjustedInput
+        }
+
+        // The rate projection restores wheel input split across high-frequency ticks,
+        // but it must not exceed the real signed distance received recently.
+        let recentInput = recentInputs.reduce(0) { $0 + $1.delta }
+        guard recentInput != 0,
+              recentInput.sign == projectedInput.sign else {
+            return projectedInput
+        }
+
+        let projectedMagnitude = abs(projectedInput)
+        let inputMagnitude = abs(pendingInput)
+        let recentMagnitude = abs(recentInput)
+        if projectedMagnitude > recentMagnitude {
+            let cappedMagnitude = max(inputMagnitude, recentMagnitude)
+            projectedInput = projectedInput.sign == .minus ? -cappedMagnitude : cappedMagnitude
+        }
+
+        return projectedInput
+    }
+
+    mutating func reset() {
+        rateAdjustedInput = 0
+        direction = 0
+        lastTimestamp = nil
+        recentInputs.removeAll(keepingCapacity: true)
+    }
+
+    private mutating func advance(to timestamp: TimeInterval) {
+        guard let lastTimestamp else {
+            lastTimestamp = timestamp
+            return
+        }
+
+        let dt = max(timestamp - lastTimestamp, 0)
+        defer {
+            self.lastTimestamp = timestamp
+        }
+
+        guard dt <= Self.inputGapResetInterval else {
+            rateAdjustedInput = 0
+            direction = 0
+            recentInputs.removeAll(keepingCapacity: true)
+            return
+        }
+
+        rateAdjustedInput *= exp(-dt / Self.rateSmoothingTimeConstant)
+        if abs(rateAdjustedInput) < 0.001 {
+            rateAdjustedInput = 0
+        }
+        recentInputs.removeAll { timestamp - $0.timestamp > Self.recentInputLimitInterval }
+    }
+}

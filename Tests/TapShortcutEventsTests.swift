@@ -16,12 +16,16 @@ import Foundation
             let held = baseline.union(modifier.nativeFlag).union(CGEventFlags(rawValue: modifier.deviceMask))
             precondition(TapShortcutEvents.make(shortcut, baseFlags: held, marker: 42)[1].flags == held)
         }
-        for preset in ShortcutPreset.all where preset.keyCode != nil && ![54,55,56,58,59,60,61,62].contains(preset.keyCode!) {
+        for preset in ShortcutPreset.all where preset.keyCode != nil && ![54,55,56,57,58,59,60,61,62].contains(preset.keyCode!) {
             let events = TapShortcutEvents.make(preset.shortcut, baseFlags: baseline, marker: 42)
             precondition(events.map(\.type) == [.keyDown, .keyUp])
             precondition(events.allSatisfy { $0.flags == baseline })
             precondition(ShortcutPreset.selection(for: preset.shortcut) == preset.id)
         }
+        let caps = ShortcutPreset.all.first { $0.keyCode == 57 }!.shortcut
+        precondition(ShortcutPreset.selection(for: caps) == 57)
+        precondition(TapShortcutEvents.make(caps, baseFlags: baseline, marker: 42).isEmpty,
+                     "Caps Lock uses native lock state, never ordinary keyDown/keyUp")
         precondition(TapShortcutEvents.make(TapShortcut(), baseFlags: [], marker: 42).isEmpty)
         let combo = TapShortcut(keyCode: 0, label: "⌘A", modifiers: CGEventFlags.maskCommand.rawValue)
         precondition(ShortcutPreset.selection(for: combo) == -1)

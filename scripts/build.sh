@@ -66,6 +66,7 @@ swiftc \
   "$ROOT_DIR/Sources/App/InputPolicies.swift" \
   "$ROOT_DIR/Sources/Shared/ShortcutPresets.swift" \
   "$ROOT_DIR/Sources/App/TapShortcutEvents.swift" \
+  "$ROOT_DIR/Sources/App/NativeCapsLock.swift" \
   "$ROOT_DIR/Sources/App/PropertyLeaseJournal.swift" \
   "$ROOT_DIR/Sources/App/HIDSettingsLease.swift" \
   "$ROOT_DIR"/Sources/Vendor/LinearMouse/*.swift \

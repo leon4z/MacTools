@@ -262,7 +262,7 @@ private struct HyperSettingsPage: View {
                     ShortcutRecorder(shortcut: mapping.tap, recording: $model.recording).frame(height: 30)
                     Button("清除") { mapping.wrappedValue.tap = TapShortcut() }
                 }
-                Text("辅助键可从下拉栏选择；组合键点击录制框录入。单击辅助键只发送一次按下和松开，不会持续按住。")
+                Text("选 Caps Lock 可在单击时切换系统大写锁定；按住并组合其他键时仅作为 Hyper／Meh。其他辅助键单击后会立即松开。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

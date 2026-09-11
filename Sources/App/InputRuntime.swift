@@ -250,7 +250,7 @@ final class InputRuntime: ObservableObject {
             let drags = [.leftMouseDragged, .rightMouseDragged, .otherMouseDragged].contains(type)
             let apply = keyboard || (clicks && configuration.hyper.clicks) || (drags && configuration.hyper.drags)
                 || (type == .mouseMoved && configuration.hyper.moves) || (type == .scrollWheel && configuration.hyper.scroll)
-            if type == .keyDown || type == .scrollWheel || clicks || drags || (type == .mouseMoved && configuration.hyper.moves) { state.markUsed() }
+            if type == .keyDown || type == .flagsChanged || type == .scrollWheel || clicks || drags || (type == .mouseMoved && configuration.hyper.moves) { state.markUsed() }
             event.flags = state.outputFlags(raw: event.flags, mappings: mappings, apply: apply)
             if keyboard, mappedShortcutHandler?(type, event, !state.pressed.isEmpty) == true { return nil }
         }
@@ -258,6 +258,11 @@ final class InputRuntime: ObservableObject {
     }
     private func postShortcut(_ shortcut: TapShortcut) {
         guard hyperRunning else { return }
+        if shortcut.keyCode == 57 {
+            do { try NativeCapsLock.toggle() }
+            catch { hyperStatus = "大写锁定切换失败：" + error.localizedDescription }
+            return
+        }
         let baseline = state.outputFlags(raw: CGEventSource.flagsState(.hidSystemState), mappings: mappings, apply: true)
         for event in TapShortcutEvents.make(shortcut, baseFlags: baseline, marker: Self.marker) {
             event.post(tap: .cghidEventTap)

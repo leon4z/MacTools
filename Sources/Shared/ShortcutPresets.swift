@@ -8,6 +8,7 @@ struct ShortcutPreset: Identifiable {
 
     static let all: [ShortcutPreset] = [
         .init(id: 0, title: "不执行操作", keyCode: nil),
+        .init(id: 57, title: "⇪ Caps Lock（切换大写锁定）", keyCode: 57),
         .init(id: 55, title: "左 ⌘ Command", keyCode: 55), .init(id: 54, title: "右 ⌘ Command", keyCode: 54),
         .init(id: 58, title: "左 ⌥ Option", keyCode: 58), .init(id: 61, title: "右 ⌥ Option", keyCode: 61),
         .init(id: 59, title: "左 ⌃ Control", keyCode: 59), .init(id: 62, title: "右 ⌃ Control", keyCode: 62),

@@ -123,7 +123,7 @@ enum ToolMenuCacheTests {
         body: (URL) throws -> Void
     ) throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FinderRightClick-ToolMenuCacheTests-\(label)-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("MacTools-ToolMenuCacheTests-\(label)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         try body(directory)

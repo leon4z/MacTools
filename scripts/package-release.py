@@ -34,7 +34,7 @@ def main():
     version, build = info["CFBundleShortVersionString"], info["CFBundleVersion"]
     if not re.fullmatch(r"[0-9]+\.[0-9]+\.[0-9]+", version) or not re.fullmatch(r"[0-9]+", build):
         raise SystemExit("Release requires numeric x.y.z version and numeric build.")
-    requirement = f'identifier "local.leon.FinderRightClick" and certificate leaf = H"{SIGNING_FINGERPRINT}"'
+    requirement = f'identifier "com.leon4z.MacTools" and certificate leaf = H"{SIGNING_FINGERPRINT}"'
     run("/usr/bin/codesign", "--verify", "--deep", "--strict", "-R=" + requirement, app)
     sparkle = pathlib.Path(run("bash", ROOT / "scripts/setup-sparkle.sh", capture_output=True, text=True).stdout.strip())
     public_key = run(sparkle / "bin/generate_keys", "--account", ACCOUNT, "-p", capture_output=True, text=True).stdout.strip()
@@ -68,7 +68,7 @@ def main():
         f"{{{SPARKLE_NS}}}version": build, f"{{{SPARKLE_NS}}}shortVersionString": version,
         f"{{{SPARKLE_NS}}}edSignature": signature,
     })
-    feed = out / "appcast.xml"
+    feed = out / "mactools-appcast.xml"
     ET.indent(rss, space="  ")
     ET.ElementTree(rss).write(feed, encoding="utf-8", xml_declaration=True)
     run(sparkle / "bin/sign_update", "--account", ACCOUNT, feed)

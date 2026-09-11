@@ -11,9 +11,9 @@ run_test() {
     "$TEST_DIR/$name"
 }
 run_test AppMenuTests Sources/App/AppMenu.swift
-run_test ToolConfigurationTests Sources/Shared/ToolConfiguration.swift Sources/Shared/ToolCatalog.swift
+run_test ToolConfigurationTests Sources/Shared/MoveRequest.swift Sources/Shared/ToolConfiguration.swift Sources/Shared/ToolCatalog.swift
 run_test ToolMenuCacheTests Sources/Shared/ToolConfiguration.swift Sources/Shared/ToolCatalog.swift Sources/Extension/ToolMenuCache.swift
-run_test MoveServiceTests Sources/Shared/MoveRequest.swift Sources/App/MoveService.swift
+run_test MoveServiceTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MoveRequest.swift Sources/App/MoveService.swift
 run_test StandaloneMenuTests Sources/App/StandaloneMenuContext.swift
 run_test InputPolicyTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/App/InputPolicies.swift
 run_test TapShortcutEventsTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/ShortcutPresets.swift Sources/App/InputPolicies.swift Sources/App/TapShortcutEvents.swift

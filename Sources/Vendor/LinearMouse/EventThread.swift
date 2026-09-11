@@ -16,7 +16,7 @@ private final class EventThreadResultBox<Value> {
 final class EventThread {
     static let shared = EventThread()
 
-    private static let log = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "local.leon.MacTools", category: "EventThread")
+    private static let log = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "com.leon4z.MacTools", category: "EventThread")
 
     /// The RunLoop of the background thread. Nil when the thread is not running.
     /// Exposed for `EventTap` to attach its `CFMachPort` source.
@@ -54,7 +54,7 @@ final class EventThread {
             self.runLoopReady.signal()
             CFRunLoopRun()
         }
-        thread.name = "local.leon.MacTools.mouse-events"
+        thread.name = "com.leon4z.MacTools.mouse-events"
         thread.qualityOfService = .userInteractive
         self.thread = thread
         thread.start()

@@ -7,9 +7,9 @@
 	<key>CFBundleDisplayName</key>
 	<string>MacTools Finder Extension</string>
 	<key>CFBundleExecutable</key>
-	<string>FinderRightClickExtension</string>
+	<string>MacToolsFinderExtension</string>
 	<key>CFBundleIdentifier</key>
-	<string>local.leon.FinderRightClick.Extension</string>
+	<string>com.leon4z.MacTools.FinderExtension</string>
 	<key>CFBundleInfoDictionaryVersion</key>
 	<string>6.0</string>
 	<key>CFBundleName</key>
@@ -21,9 +21,9 @@
 		<string>MacOSX</string>
 	</array>
 	<key>CFBundleShortVersionString</key>
-	<string>1.3.0</string>
+	<string>1.4.0</string>
 	<key>CFBundleVersion</key>
-	<string>23</string>
+	<string>27</string>
 	<key>LSMinimumSystemVersion</key>
 	<string>26.0</string>
 	<key>LSUIElement</key>
@@ -35,7 +35,7 @@
 		<key>NSExtensionPointIdentifier</key>
 		<string>com.apple.FinderSync</string>
 		<key>NSExtensionPrincipalClass</key>
-		<string>FinderRightClickExtension.FinderSync</string>
+		<string>MacToolsFinderExtension.FinderSync</string>
 	</dict>
 	<key>NSPrincipalClass</key>
 	<string>NSApplication</string>

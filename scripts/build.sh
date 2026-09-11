@@ -2,14 +2,14 @@
 set -euo pipefail
 
 ROOT_DIR="$(cd "$(dirname "$0")/.." && pwd)"
-BUILD_DIR="${FRC_BUILD_DIR:-$ROOT_DIR/build}"
+BUILD_DIR="${MACTOOLS_BUILD_DIR:-$ROOT_DIR/build}"
 # Alternate outputs stay inside this project; never clean an arbitrary path.
 if [[ "$BUILD_DIR" != "$ROOT_DIR/build" && "$BUILD_DIR" != "$ROOT_DIR/local/"*"/build" ]] || [[ "$BUILD_DIR" == *"/../"* ]]; then
   echo "Unsupported build output directory" >&2
   exit 1
 fi
 APP="$BUILD_DIR/MacTools.app"
-APPEX="$APP/Contents/PlugIns/FinderRightClickExtension.appex"
+APPEX="$APP/Contents/PlugIns/MacToolsFinderExtension.appex"
 SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
 TARGET="arm64-apple-macosx26.0"
 SPARKLE_DIR="$(bash "$ROOT_DIR/scripts/setup-sparkle.sh")"
@@ -86,7 +86,7 @@ swiftc \
 swiftc \
   -target "$TARGET" \
   -sdk "$SDK_PATH" \
-  -module-name FinderRightClickExtension \
+  -module-name MacToolsFinderExtension \
   -framework AppKit \
   -framework FinderSync \
   "$ROOT_DIR/Sources/Shared/ToolConfiguration.swift" \
@@ -96,7 +96,7 @@ swiftc \
   "$ROOT_DIR/Sources/Extension/ToolMenuCache.swift" \
   "$ROOT_DIR/Sources/Extension/FinderSync.swift" \
   "$ROOT_DIR/Sources/Extension/ExtensionMain.swift" \
-  -o "$APPEX/Contents/MacOS/FinderRightClickExtension"
+  -o "$APPEX/Contents/MacOS/MacToolsFinderExtension"
 
 # Sign inside-out. Never use --deep to sign nested code implicitly.
 SPARKLE_FRAMEWORK="$APP/Contents/Frameworks/Sparkle.framework/Versions/B"

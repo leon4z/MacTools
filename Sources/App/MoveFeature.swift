@@ -3,7 +3,7 @@ import Darwin
 import Foundation
 
 final class MoveFeatureController {
-    private let operationQueue = DispatchQueue(label: "local.leon.FinderRightClick.move", qos: .userInitiated)
+    private let operationQueue = DispatchQueue(label: "com.leon4z.MacTools.move", qos: .userInitiated)
     private let lastDestinationKey = "MoveFeature.lastSuccessfulDestination"
     private let log: (String) -> Void
 
@@ -262,7 +262,7 @@ private final class MoveProcessLock {
             return nil
         }
 
-        let directory = cachesDirectory.appendingPathComponent("FinderRightClick", isDirectory: true)
+        let directory = cachesDirectory.appendingPathComponent("MacTools", isDirectory: true)
         do {
             try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         } catch {

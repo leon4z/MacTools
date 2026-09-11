@@ -219,9 +219,9 @@ enum NewFileService {
     private static func createZipPackage(files: [String: String], at fileURL: URL) throws {
         let fileManager = FileManager.default
         let workRoot = fileManager.temporaryDirectory
-            .appendingPathComponent("FinderRightClick-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("MacTools-\(UUID().uuidString)", isDirectory: true)
         let zipURL = fileManager.temporaryDirectory
-            .appendingPathComponent("FinderRightClick-\(UUID().uuidString).zip")
+            .appendingPathComponent("MacTools-\(UUID().uuidString).zip")
 
         defer {
             try? fileManager.removeItem(at: workRoot)
@@ -248,7 +248,7 @@ enum NewFileService {
 
         guard process.terminationStatus == 0 else {
             throw NSError(
-                domain: "FinderRightClick.NewFile",
+                domain: "MacTools.NewFile",
                 code: Int(process.terminationStatus),
                 userInfo: [NSLocalizedDescriptionKey: "创建 Office 文件失败"]
             )

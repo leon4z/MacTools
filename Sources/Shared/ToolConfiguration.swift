@@ -22,8 +22,8 @@ enum ToolConfigurationStore {
     }
 
     private static let currentVersion = 1
-    static let extensionBundleIdentifier = "local.leon.FinderRightClick.Extension"
-    private static let directoryName = "FinderRightClick"
+    static let extensionBundleIdentifier = "com.leon4z.MacTools.FinderExtension"
+    private static let directoryName = "MacTools"
     private static let fileName = "ToolConfiguration.json"
 
     static func loadResult(from url: URL = configurationURL()) -> ToolConfigurationLoadResult {
@@ -46,7 +46,7 @@ enum ToolConfigurationStore {
     static func save(_ tools: [ConfiguredTool], to url: URL = configurationURL()) throws {
         guard isValid(tools) else {
             throw NSError(
-                domain: "FinderRightClick.ToolConfiguration",
+                domain: "MacTools.ToolConfiguration",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "工具配置包含无效或重复的 App"]
             )
@@ -125,7 +125,7 @@ struct OpenToolRequest: Equatable {
     }
 
     init?(url: URL) {
-        guard url.scheme == "finderrightclick", url.host == "open" else { return nil }
+        guard url.scheme == "mactools", url.host == "open" else { return nil }
         let queryItems = URLComponents(url: url, resolvingAgainstBaseURL: false)?.queryItems ?? []
         guard
             let requestID = queryItems.first(where: { $0.name == "requestID" })?.value,
@@ -139,7 +139,7 @@ struct OpenToolRequest: Equatable {
 
     var callbackURL: URL? {
         var components = URLComponents()
-        components.scheme = "finderrightclick"
+        components.scheme = "mactools"
         components.host = "open"
         components.queryItems = [
             URLQueryItem(name: "requestID", value: requestID)
@@ -183,7 +183,7 @@ enum OpenToolRequestStore {
             payload.selectedPath.hasPrefix("/")
         else {
             throw NSError(
-                domain: "FinderRightClick.OpenToolRequest",
+                domain: "MacTools.OpenToolRequest",
                 code: 1,
                 userInfo: [NSLocalizedDescriptionKey: "打开工具请求无效"]
             )

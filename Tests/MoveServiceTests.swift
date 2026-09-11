@@ -226,9 +226,9 @@ enum MoveServiceTests {
 
     private static func testCrossVolumeMetadata(at secondVolume: URL) throws {
         let fileManager = FileManager.default
-        let fixtureRoot = fileManager.temporaryDirectory.appendingPathComponent("FinderRightClick-cross-\(UUID().uuidString)", isDirectory: true)
+        let fixtureRoot = fileManager.temporaryDirectory.appendingPathComponent("MacTools-cross-\(UUID().uuidString)", isDirectory: true)
         let sourceDirectory = fixtureRoot.appendingPathComponent("source", isDirectory: true)
-        let destinationDirectory = secondVolume.appendingPathComponent("FinderRightClick-test-\(UUID().uuidString)", isDirectory: true)
+        let destinationDirectory = secondVolume.appendingPathComponent("MacTools-test-\(UUID().uuidString)", isDirectory: true)
         try fileManager.createDirectory(at: sourceDirectory, withIntermediateDirectories: true)
         try fileManager.createDirectory(at: destinationDirectory, withIntermediateDirectories: true)
         defer {
@@ -239,7 +239,7 @@ enum MoveServiceTests {
         let sourceFile = sourceDirectory.appendingPathComponent("metadata.txt")
         try Data("cross-volume".utf8).write(to: sourceFile)
         try fileManager.setAttributes([.posixPermissions: 0o640], ofItemAtPath: sourceFile.path)
-        try setExtendedAttribute(name: "local.leon.FinderRightClick.test", value: Data("tag".utf8), at: sourceFile)
+        try setExtendedAttribute(name: "com.leon4z.MacTools.test", value: Data("tag".utf8), at: sourceFile)
         try setFlags(UInt32(UF_HIDDEN), at: sourceFile)
         try addReadACL(at: sourceFile)
         let originalStat = try statSnapshot(at: sourceFile)
@@ -249,7 +249,7 @@ enum MoveServiceTests {
         let childFile = sourceFolder.appendingPathComponent("child.txt")
         try fileManager.createDirectory(at: sourceFolder, withIntermediateDirectories: true)
         try Data("child".utf8).write(to: childFile)
-        try setExtendedAttribute(name: "local.leon.FinderRightClick.child", value: Data("child-tag".utf8), at: childFile)
+        try setExtendedAttribute(name: "com.leon4z.MacTools.child", value: Data("child-tag".utf8), at: childFile)
 
         let brokenLink = sourceDirectory.appendingPathComponent("broken-link")
         try fileManager.createSymbolicLink(
@@ -273,7 +273,7 @@ enum MoveServiceTests {
         try expect(movedContents == Data("cross-volume".utf8), "cross-volume content preserved independently")
         let movedAttributes = try fileManager.attributesOfItem(atPath: movedFile.path)
         try expect((movedAttributes[.posixPermissions] as? NSNumber)?.intValue == 0o640, "cross-volume mode preserved independently")
-        let movedAttribute = try extendedAttribute(name: "local.leon.FinderRightClick.test", at: movedFile)
+        let movedAttribute = try extendedAttribute(name: "com.leon4z.MacTools.test", at: movedFile)
         try expect(movedAttribute == Data("tag".utf8), "cross-volume xattr preserved independently")
         let movedStat = try statSnapshot(at: movedFile)
         try expect(movedStat.flags == originalStat.flags, "cross-volume BSD flags preserved independently")
@@ -372,7 +372,7 @@ enum MoveServiceTests {
         try expect(decoded.sourcePaths == paths, "large special-character selection round trips through request payload")
 
         var components = URLComponents()
-        components.scheme = "finderrightclick"
+        components.scheme = "mactools"
         components.host = "move"
         components.queryItems = [URLQueryItem(name: "requestID", value: requestID)]
 
@@ -385,7 +385,7 @@ enum MoveServiceTests {
         body: (URL, URL) throws -> Void
     ) throws {
         let root = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "FinderRightClick-\(name)-\(UUID().uuidString)",
+            "MacTools-\(name)-\(UUID().uuidString)",
             isDirectory: true
         )
         let source = root.appendingPathComponent("source", isDirectory: true)
@@ -402,11 +402,11 @@ enum MoveServiceTests {
         body: (URL, URL) throws -> Void
     ) throws {
         let sourceRoot = FileManager.default.temporaryDirectory.appendingPathComponent(
-            "FinderRightClick-\(name)-\(UUID().uuidString)",
+            "MacTools-\(name)-\(UUID().uuidString)",
             isDirectory: true
         )
         let destinationRoot = secondVolume.appendingPathComponent(
-            "FinderRightClick-\(name)-\(UUID().uuidString)",
+            "MacTools-\(name)-\(UUID().uuidString)",
             isDirectory: true
         )
         try FileManager.default.createDirectory(at: sourceRoot, withIntermediateDirectories: true)

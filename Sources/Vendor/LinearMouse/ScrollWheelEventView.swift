@@ -7,7 +7,7 @@ import SceneKit
 
 class ScrollWheelEventView {
     let event: CGEvent
-    private static let log = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "local.leon.MacTools", category: "ScrollWheelEventView")
+    private static let log = OSLog(subsystem: Bundle.main.bundleIdentifier ?? "com.leon4z.MacTools", category: "ScrollWheelEventView")
 
     private let ioHidEvent: IOHIDEvent?
 

@@ -158,7 +158,7 @@ final class FinderSync: FIFinderSync {
         }
 
         var components = URLComponents()
-        components.scheme = "finderrightclick"
+        components.scheme = "mactools"
         components.host = "new-file"
         components.queryItems = [
             URLQueryItem(name: "directoryPath", value: directoryURL.path)
@@ -196,7 +196,7 @@ final class FinderSync: FIFinderSync {
         }
 
         var components = URLComponents()
-        components.scheme = "finderrightclick"
+        components.scheme = "mactools"
         components.host = "move"
         components.queryItems = [
             URLQueryItem(name: "requestID", value: requestID)

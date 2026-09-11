@@ -27,7 +27,7 @@ final class StandaloneMenuController: NSObject, ObservableObject {
     private var activeMenu: NSMenu?
     private var commands: [Int: Action] = [:]
     private var chosenAction: Action?
-    private let captureQueue = DispatchQueue(label: "local.leon.FinderRightClick.context", qos: .userInitiated)
+    private let captureQueue = DispatchQueue(label: "com.leon4z.MacTools.context", qos: .userInitiated)
 
     init(defaults: UserDefaults = .standard, perform: @escaping (Action, StandaloneMenuContext) -> Void) {
         self.defaults = defaults

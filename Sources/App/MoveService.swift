@@ -231,7 +231,7 @@ enum MoveService {
         fileManager: FileManager
     ) throws {
         let temporaryURL = destinationURL.deletingLastPathComponent().appendingPathComponent(
-            ".FinderRightClick-\(UUID().uuidString).moving"
+            ".MacTools-\(UUID().uuidString).moving"
         )
 
         do {

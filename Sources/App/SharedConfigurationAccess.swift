@@ -1,7 +1,7 @@
 import AppKit
 
-/// Keep the legacy extension container; obtain access through the system picker
-/// when a signing-identity migration invalidates the previous grant.
+/// Obtain scoped access to the Finder extension’s shared configuration directory.
+/// This is file-access authorization, independent of input Accessibility permission.
 @MainActor
 enum SharedConfigurationAccess {
     private static let bookmarkKey = "MacTools.SharedConfigurationBookmark"
@@ -24,8 +24,8 @@ enum SharedConfigurationAccess {
     }
     static func reconnect() throws -> Bool {
         let panel = NSOpenPanel()
-        panel.title = "重新连接 MacTools 配置"
-        panel.message = "请选择已定位的 FinderRightClick 配置文件夹，让 MacTools 重新读取原有设置。不会移动或覆盖配置。"
+        panel.title = "访问 MacTools 配置"
+        panel.message = "请选择已定位的 MacTools 配置文件夹，允许读取和保存设置。"
         panel.prompt = "允许访问"
         panel.canChooseDirectories = true
         panel.canChooseFiles = false
@@ -34,7 +34,7 @@ enum SharedConfigurationAccess {
         guard panel.runModal() == .OK, let selected = panel.url else { return false }
         guard selected.standardizedFileURL == directory.standardizedFileURL else {
             throw NSError(domain: "MacTools.ConfigurationAccess", code: 1,
-                          userInfo: [NSLocalizedDescriptionKey: "请选择原有的 FinderRightClick 配置文件夹。"])
+                          userInfo: [NSLocalizedDescriptionKey: "请选择 MacTools 配置文件夹。"])
         }
         _ = selected.startAccessingSecurityScopedResource()
         do {

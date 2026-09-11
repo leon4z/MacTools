@@ -19,9 +19,20 @@
 不要全局信任不相关用途。首次从临时签名切换到证书签名，重新授权一次是预期的身份迁移。
 未来 Developer ID 迁移需单独验收授权行为。
 
-配置目录若因身份迁移暂时不可读，使用应用内“重新连接配置”经系统选择器重新授权原目录。
+配置目录若被系统限制访问，使用应用内“重新连接配置”经系统选择器授权配置目录。
 应用保存该目录的安全作用域书签，启动时先恢复访问；读取失败期间拒绝保存默认配置。
 这与辅助功能授权分别处理，不应索取全盘访问权限，也不修改 TCC 或容器保护元数据。
+
+## 产品标识
+
+- 宿主：`com.leon4z.MacTools`
+- Finder 扩展：`com.leon4z.MacTools.FinderExtension`
+- 扩展模块与可执行文件：`MacToolsFinderExtension`
+- URL scheme：`mactools`
+- 共享配置文件夹：扩展容器内的 `Data/Library/Application Support/MacTools`
+
+1.4.0 是 MacTools 独立身份的起点，首次安装采用下载包直接安装；之后的版本通过应用内更新。
+本机开发期配置的一次性迁移记录仅保存在本地，不随产品分发。
 
 ## 常规发布
 
@@ -39,14 +50,14 @@
    打包脚本检查宿主指定代码要求、ZIP 解压后的深度签名、钥匙串公钥与内置公钥一致性，
    并使用 CryptoKit 公钥验证档案签名。输出在 `local/releases/<version>-<build>/`，重复打包不覆盖已有产物。
 4. 保留运行中的输入恢复机制，通过旧版本检查更新验证新包下载、安装、重启和辅助功能权限。
-   对固定身份至少验收一次授权后连续两次更新。记录系统版本、各版本 CodeDirectory hash、指定代码要求及输入运行状态。
+   首次建立固定身份时验收授权在连续更新后的保留情况；常规版本验证上一版到新版的更新即可。记录系统版本、各版本 CodeDirectory hash、指定代码要求及输入运行状态。
    不能把签名校验通过等同于真实权限验收通过。
 5. 独立只读审查后，只暂存允许公开的源码和文档；提交、推送，创建标签和 Release。
-   上传 ZIP、`appcast.xml`、`SHA256SUMS.txt`。先创建草稿并上传齐全部资产，再发布并设为 latest，避免 feed 短暂缺失。Release 说明必须保留“自签名、未公证”和最低系统版本。
-6. 公开后下载资产校验哈希与签名，确认标签对应提交、CI 通过、旧应用能发现新版本。
+   上传 ZIP、`mactools-appcast.xml`、`SHA256SUMS.txt`。先创建草稿并上传齐全部资产，再发布并设为 latest，避免 feed 短暂缺失。Release 说明必须保留“自签名、未公证”和最低系统版本。
+6. 公开后下载资产校验哈希与签名，确认标签对应提交、CI 通过、同一应用身份的上一版本能发现新版本。
    不覆盖已发布版本的 ZIP。修复另发更高版本。
 
-固定 feed：`https://github.com/leon4z/MacTools/releases/latest/download/appcast.xml`。
+固定 feed：`https://github.com/leon4z/MacTools/releases/latest/download/mactools-appcast.xml`。
 feed 中的 ZIP 地址必须指向明确版本标签，不能指向 `latest`；否则缓存可能把旧签名与新包混用。
 发布脚本同时签名 feed 和 ZIP。ZIP 的 Ed25519 签名是安装前的必要校验。
 

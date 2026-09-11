@@ -29,14 +29,14 @@
       "file": "EventThread.swift",
       "upstream_path": "LinearMouse/EventTap/EventThread.swift",
       "upstream_sha256": "d08b07088972548241e8e02373585ea497f1d2162b9361bb30f64eb9ea77a46d",
-      "local_sha256": "40f9b8652cce83a3823d243aa539d95d6d881e1c13c4fd140d8e2be82f8f73a9",
+      "local_sha256": "671f3aa465d4f8ebf518b40bd081dd27f4fb6def02c60a94143b60a424a8b891",
       "unchanged": false
     },
     {
       "file": "ScrollWheelEventView.swift",
       "upstream_path": "LinearMouse/EventView/ScrollWheelEventView.swift",
       "upstream_sha256": "76f0ec05b64680626634e809489a642a16e521c482b1a82f92b5249d3e74e168",
-      "local_sha256": "e4c5d080e656856f11aa80938020f6e96c5007784f653b839cd200a3be3a51bd",
+      "local_sha256": "1adb683b288843bd7776a31b22a88e8856ad3f0fe50657dd27f6b9f3fe73cc71",
       "unchanged": false
     },
     {

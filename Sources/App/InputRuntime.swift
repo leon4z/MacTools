@@ -42,7 +42,7 @@ final class InputRuntime: ObservableObject {
     }
     func apply(_ configuration: MacToolsConfiguration, recording: Bool = false) {
         defer {
-            Logger(subsystem: "local.leon.MacTools", category: "InputRuntime").notice(
+            Logger(subsystem: "com.leon4z.MacTools", category: "InputRuntime").notice(
                 "Input status: mouse=\(self.mouseStatus, privacy: .public); hyper=\(self.hyperStatus, privacy: .public)")
         }
         stop()

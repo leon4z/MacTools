@@ -7,28 +7,21 @@ struct MoveRequestPayload: Codable {
 }
 
 enum MoveRequestStore {
-    private static let directoryName = "FinderRightClick/PendingMove"
-    private static let extensionBundleIdentifier = "local.leon.FinderRightClick.Extension"
+    private static let directoryName = "PendingMove"
 
     static func writeFromExtension(_ payload: MoveRequestPayload) throws {
-        let cachesDirectory = try FileManager.default.url(
-            for: .cachesDirectory,
-            in: .userDomainMask,
-            appropriateFor: nil,
-            create: true
-        )
-        let directory = cachesDirectory.appendingPathComponent(directoryName, isDirectory: true)
+        let directory = requestDirectoryURL(isExtensionProcess: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         try JSONEncoder().encode(payload).write(to: requestURL(payload.requestID, in: directory), options: .atomic)
     }
 
     static func consumeFromHost(requestID: String) -> MoveRequestPayload? {
         guard UUID(uuidString: requestID) != nil else { return nil }
-        return consume(requestURL(requestID, in: hostRequestDirectory()))
+        return consume(requestURL(requestID, in: requestDirectoryURL(isExtensionProcess: false)))
     }
 
     static func consumeOldestFreshRequestFromHost(maximumAge: TimeInterval = 120) -> MoveRequestPayload? {
-        let directory = hostRequestDirectory()
+        let directory = requestDirectoryURL(isExtensionProcess: false)
         guard let files = try? FileManager.default.contentsOfDirectory(
             at: directory,
             includingPropertiesForKeys: [.contentModificationDateKey],
@@ -76,12 +69,15 @@ enum MoveRequestStore {
         return payload
     }
 
-    private static func hostRequestDirectory() -> URL {
-        URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
-            .appendingPathComponent("Library/Containers", isDirectory: true)
-            .appendingPathComponent(extensionBundleIdentifier, isDirectory: true)
-            .appendingPathComponent("Data/Library/Caches", isDirectory: true)
-            .appendingPathComponent(directoryName, isDirectory: true)
+    static func requestDirectoryURL(
+        isExtensionProcess: Bool,
+        homeDirectory: URL = URL(fileURLWithPath: NSHomeDirectory(), isDirectory: true)
+    ) -> URL {
+        // Keep requests inside the directory covered by the host's scoped bookmark.
+        ToolConfigurationStore.sharedApplicationSupportURL(
+            isExtensionProcess: isExtensionProcess,
+            homeDirectory: homeDirectory
+        ).appendingPathComponent(directoryName, isDirectory: true)
     }
 
     private static func requestURL(_ requestID: String, in directory: URL) -> URL {

@@ -27,8 +27,8 @@ and application shortcuts. Built with Swift, SwiftUI and AppKit.
 
 **当前发布包使用固定自签名身份，没有 Apple Developer ID 签名或 Apple 公证。**
 首次下载可能被 Gatekeeper 阻止；确认来自本仓库后，可在系统设置的“隐私与安全性”中允许打开。
-无需关闭系统安全机制。首次安装或从旧临时签名版本迁移，可能需要重新授予辅助功能权限。
-若旧配置提示无权读取，使用“应用设置 → 重新连接配置”，在系统选择器中确认原文件夹即可；原文件不会移动或覆盖。
+无需关闭系统安全机制。首次安装需要授予辅助功能权限。
+若系统拒绝访问配置目录，可在应用设置中授权访问 MacTools 配置文件夹。
 固定身份用于保持后续版本的连续性，但不保证系统升级、用户重置权限或更换签名身份后权限仍保留。
 
 避免同时启用多个工具来改写同一鼠标滚轮或按键。MacTools 不会自动退出其他工具或导入它们的配置。
@@ -42,7 +42,7 @@ Finder 扩展的可用范围取决于系统实际回调；某些目录可使用�
 更新包签名与 macOS 应用代码签名各自独立。
 
 更新前会恢复本应用临时修改的鼠标和键盘参数；有文件移动任务时等待任务完成。
-更新不会替换用户配置。首次接入更新机制的旧版本需要手动安装一次。
+更新不会替换用户配置。
 
 ## 开发
 
@@ -54,7 +54,7 @@ MACTOOLS_SIGNING_IDENTITY=- bash scripts/build.sh
 ```
 
 首次测试或构建会从 Sparkle 官方 Release 下载固定 **2.9.6** 版本并校验 SHA-256，缓存保存在忽略的 `local/`。
-产物位于 `build/MacTools.app`。可用 `FRC_BUILD_DIR` 指定本项目 `local/` 内以 `/build` 结尾的目录。
+产物位于 `build/MacTools.app`。可用 `MACTOOLS_BUILD_DIR` 指定本项目 `local/` 内以 `/build` 结尾的目录。
 `-` 表示临时签名，仅适合开发；频繁安装这种产物可能需要反复授权。
 
 使用自己钥匙串中的固定代码签名身份进行本机安装：
@@ -63,7 +63,7 @@ MACTOOLS_SIGNING_IDENTITY=- bash scripts/build.sh
 MACTOOLS_SIGNING_IDENTITY="你的签名身份" bash scripts/install-local.sh
 ```
 
-安装脚本正常退出旧应用、备份旧包、检查签名，并注册安装目录的 Finder 扩展。
+安装脚本正常退出正在运行的 MacTools、备份旧包、检查签名，并注册安装目录的 Finder 扩展。
 维护者的默认安装身份为 `MacTools Local Signing`，不存在时安装应失败，不降级为临时签名。
 图标原稿位于 `Resources/AppIcon-source.png`；重新打包执行 `python3 scripts/generate-icon.py`。
 
@@ -71,11 +71,7 @@ MACTOOLS_SIGNING_IDENTITY="你的签名身份" bash scripts/install-local.sh
 可选 `bash scripts/test-windowserver.sh` 需要测试应用的辅助功能权限；退出码 77 表示跳过。
 自动测试不代表所有实体鼠标和键盘均已完成验收。
 
-## 兼容与贡献
-
-为了保留既有数据与系统集成，宿主仍使用 `local.leon.FinderRightClick`，扩展仍使用
-`local.leon.FinderRightClick.Extension`，URL scheme 仍为 `finderrightclick`，旧配置容器继续兼容。
-这些内部名称不应仅为重命名而修改。
+## 贡献
 
 欢迎通过 Issue 描述系统版本、鼠标型号、复现步骤和期望行为。请移除日志中的个人路径和配置，勿提交密钥。
 输入功能的改动必须保留恢复机制和独立开关。默认测试不得改动真实 HID 配置。

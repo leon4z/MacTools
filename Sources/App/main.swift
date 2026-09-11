@@ -141,7 +141,7 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             log("ignored Finder action while installing update")
             return
         }
-        guard url.scheme == "finderrightclick" else {
+        guard url.scheme == "mactools" else {
             log("ignored url=unsupported scheme")
             return
         }

@@ -9,11 +9,12 @@ enum ToolConfigurationTests {
         try testInvalidConfigurationFailsClosed()
         try testDuplicateIdentifiersAreRejected()
         try testConfigurationLocations()
+        try testMoveRequestStaysWithinSharedGrant()
         try testOpenRequestRoundTrip()
         try testOpenRequestIsConsumedOnce()
         try testExpiredOpenRequestIsRejected()
         try testInvalidOpenRequestIDIsRejected()
-        try testLegacyOpenRequestIsRejected()
+        try testArbitraryAppPathRequestIsRejected()
         try testSmartTargetSelection()
         try testTerminalClassification()
         try testSelectedApplicationPathIsPreferred()
@@ -67,18 +68,30 @@ enum ToolConfigurationTests {
         let extensionURL = ToolConfigurationStore.configurationURL(isExtensionProcess: true, homeDirectory: home)
         let hostURL = ToolConfigurationStore.configurationURL(isExtensionProcess: false, homeDirectory: home)
         try expect(
-            extensionURL.path == "/Users/example/Library/Application Support/FinderRightClick/ToolConfiguration.json",
+            extensionURL.path == "/Users/example/Library/Application Support/MacTools/ToolConfiguration.json",
             "extension configuration path"
         )
         try expect(
-            hostURL.path == "/Users/example/Library/Containers/local.leon.FinderRightClick.Extension/Data/Library/Application Support/FinderRightClick/ToolConfiguration.json",
+            hostURL.path == "/Users/example/Library/Containers/com.leon4z.MacTools.FinderExtension/Data/Library/Application Support/MacTools/ToolConfiguration.json",
             "host configuration path"
         )
         let requestDirectory = OpenToolRequestStore.requestDirectoryURL(isExtensionProcess: false, homeDirectory: home)
         try expect(
-            requestDirectory.path == "/Users/example/Library/Containers/local.leon.FinderRightClick.Extension/Data/Library/Application Support/FinderRightClick/OpenToolRequests",
+            requestDirectory.path == "/Users/example/Library/Containers/com.leon4z.MacTools.FinderExtension/Data/Library/Application Support/MacTools/OpenToolRequests",
             "host open request path"
         )
+    }
+
+    private static func testMoveRequestStaysWithinSharedGrant() throws {
+        let home = URL(fileURLWithPath: "/Users/example", isDirectory: true)
+        let containerHome = home.appendingPathComponent(
+            "Library/Containers/com.leon4z.MacTools.FinderExtension/Data", isDirectory: true
+        )
+        let hostDirectory = MoveRequestStore.requestDirectoryURL(isExtensionProcess: false, homeDirectory: home)
+        let extensionDirectory = MoveRequestStore.requestDirectoryURL(isExtensionProcess: true, homeDirectory: containerHome)
+        let grantedDirectory = ToolConfigurationStore.sharedApplicationSupportURL(isExtensionProcess: false, homeDirectory: home)
+        try expect(hostDirectory == extensionDirectory, "host and sandboxed extension address the same move requests")
+        try expect(hostDirectory.deletingLastPathComponent() == grantedDirectory, "move requests stay inside the host's directory grant")
     }
 
     private static func testOpenRequestRoundTrip() throws {
@@ -138,9 +151,9 @@ enum ToolConfigurationTests {
         }
     }
 
-    private static func testLegacyOpenRequestIsRejected() throws {
-        let legacyURL = URL(string: "finderrightclick://open?targetPath=/tmp/a&appPath=/Applications/Test.app")!
-        try expect(OpenToolRequest(url: legacyURL) == nil, "legacy arbitrary app path request is rejected")
+    private static func testArbitraryAppPathRequestIsRejected() throws {
+        let untrustedURL = URL(string: "mactools://open?targetPath=/tmp/a&appPath=/Applications/Test.app")!
+        try expect(OpenToolRequest(url: untrustedURL) == nil, "arbitrary app path request is rejected")
     }
 
     private static func testSmartTargetSelection() throws {
@@ -226,7 +239,7 @@ enum ToolConfigurationTests {
         body: (URL) throws -> Void
     ) throws {
         let directory = FileManager.default.temporaryDirectory
-            .appendingPathComponent("FinderRightClick-ToolTests-\(label)-\(UUID().uuidString)", isDirectory: true)
+            .appendingPathComponent("MacTools-ToolTests-\(label)-\(UUID().uuidString)", isDirectory: true)
         try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
         defer { try? FileManager.default.removeItem(at: directory) }
         try body(directory)

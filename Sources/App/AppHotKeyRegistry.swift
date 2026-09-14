@@ -53,6 +53,11 @@ import Carbon
     func register(_ shortcut: TapShortcut, action: @escaping () -> Void) -> String? {
         guard let code = shortcut.keyCode else { return "尚未设置快捷键" }
         let modifiers = Self.carbonModifiers(shortcut.modifiers)
+        // This fixed system command is also used to dispatch the lock action.
+        // Keep it out of our registry even when CopySymbolicHotKeys omits it.
+        if code == 12 && modifiers == UInt32(controlKey | cmdKey) {
+            return "⌃⌘Q 是 macOS 锁屏快捷键，请选择其他组合。"
+        }
         var symbolic: Unmanaged<CFArray>?
         if CopySymbolicHotKeys(&symbolic) == noErr, let keys = symbolic?.takeRetainedValue() as? [[String: Any]],
            keys.contains(where: { ($0[kHISymbolicHotKeyEnabled as String] as? NSNumber)?.boolValue == true

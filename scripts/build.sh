@@ -75,12 +75,14 @@ swiftc \
   "$ROOT_DIR/Sources/App/InputRuntime.swift" \
   "$ROOT_DIR/Sources/Shared/AppShortcutConfiguration.swift" \
   "$ROOT_DIR/Sources/App/AppHotKeyRegistry.swift" \
+  "$ROOT_DIR/Sources/App/SystemShortcutExecutor.swift" \
   "$ROOT_DIR/Sources/App/AppShortcutModel.swift" \
   "$ROOT_DIR/Sources/App/AppShortcutViews.swift" \
   "$ROOT_DIR/Sources/App/SharedConfigurationAccess.swift" \
   "$ROOT_DIR/Sources/App/AppUpdateModel.swift" \
   "$ROOT_DIR/Sources/App/MacToolsModel.swift" \
   "$ROOT_DIR/Sources/App/MacToolsViews.swift" \
+  "$ROOT_DIR/Sources/App/ShortcutRecorder.swift" \
   "$ROOT_DIR/Sources/App/main.swift" \
   -o "$APP/Contents/MacOS/MacTools"
 

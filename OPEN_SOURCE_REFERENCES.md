@@ -31,3 +31,12 @@ LinearMouse 实际引入范围、固定提交和文件哈希见 `Sources/Vendor/
 本次参考机制，独立实现小型 Carbon 注册器和 NSWorkspace 启动适配，不引入这些库或复制整份源文件。现有 UI、配置、辅助键录制继续复用。只在系统注册成功后接入内部 Hyper／Meh 路由，在已有输入事件回调中匹配，异步激活应用，不额外添加输入 tap。这样也避免依赖系统是否会对 session tap 修改后的 flags 再次进行 Carbon 匹配。
 
 测试应分层：配置和生命周期使用假注册器；辅助键事件只检查成对输出；普通 Carbon 的真实物理组合和安装后应用切换需现场验证。本机模拟 CGEvent 未触发 Carbon 热键，因此该自动测试不作为物理快捷键失败或成功的结论。
+
+## 系统操作（1.6.0）
+
+- [Apple macOS 键盘快捷键](https://support.apple.com/zh-cn/102650)：锁屏、截图、桌面、全屏与字符检视器的系统按键。
+- [Hammerspoon system-key event 文档](https://www.hammerspoon.org/docs/hs.eventtap.event.html#newSystemKeyEvent)：媒体按下／松开事件的参考；本项目按本机 IOKit `ev_keymap.h` 的 `NX_KEYTYPE_*` 及 AppKit API 独立实现，没有引入 Hammerspoon 运行时。
+- Apple SDK `IOPMLib.h`：整机睡眠使用公开 `IOPMSleepSystem`，调用者可以是控制台用户；显示器睡眠使用固定系统命令 `pmset displaysleepnow`，不提权。
+- Apple Carbon Text Input Sources API：在已启用且可选择的输入法之间轮换，不模拟 Fn，也不修改系统输入法设置。
+
+所有输出事件带有内部标记，跳过 Hyper／Meh 再映射；配置及执行前另行检查输出与 MacTools 触发组合冲突，防止再次触发本应用绑定。

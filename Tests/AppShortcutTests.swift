@@ -11,6 +11,22 @@ import Foundation
     func unregisterAll() { actions.removeAll() }
 }
 
+@MainActor private final class FakeSystemExecutor: SystemShortcutExecuting {
+    var availability: String?
+    var failure: String?
+    var executed: [SystemActionPlan] = []
+    var deferred = false
+    var completions: [(String?) -> Void] = []
+    func plan(for item: SystemShortcut) throws -> SystemActionPlan {
+        if let availability { throw AppShortcutError.message(availability) }
+        return try SystemShortcutExecutor.makePlan(for: item)
+    }
+    func execute(_ plan: SystemActionPlan, completion: @escaping (String?) -> Void) {
+        executed.append(plan)
+        if deferred { completions.append(completion) } else { completion(failure) }
+    }
+}
+
 @main enum AppShortcutTests {
     @MainActor static func main() throws {
         let directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()
@@ -33,7 +49,7 @@ import Foundation
         invalid = c; invalid.apps[0].shortcut.modifiers = CGEventFlags.maskShift.rawValue; rejects(invalid)
         invalid = c; invalid.apps[0].shortcut.keyCode = 79; rejects(invalid)
         invalid = c; invalid.apps[0].shortcut.modifiers |= 1; rejects(invalid)
-        invalid = c; invalid.version = 2; rejects(invalid)
+        invalid = c; invalid.version = 3; rejects(invalid)
         invalid = c; invalid.apps[1].id = a.id; rejects(invalid)
         let registry = FakeRegistry()
         var missing: Set<UUID> = [b.id]
@@ -162,6 +178,231 @@ import Foundation
         try AppShortcutStore.save(c, to: brokenURL)
         blocked.reloadConfiguration()
         precondition(blocked.configurationLoaded && blocked.configuration == c && blocked.errorMessage == nil)
-        print("AppShortcutTests: all tests passed (fake registry and launcher; no user settings or HID changes)")
+
+        // Published v1 application bindings upgrade without touching disk on load.
+        var legacy = try JSONSerialization.jsonObject(with: JSONEncoder().encode(c)) as! [String: Any]
+        legacy["version"] = 1; legacy.removeValue(forKey: "systemActions")
+        let legacyBytes = try JSONSerialization.data(withJSONObject: legacy)
+        let legacyURL = directory.appendingPathComponent("legacy.json")
+        try legacyBytes.write(to: legacyURL)
+        let upgraded = try AppShortcutStore.load(from: legacyURL)
+        precondition(upgraded.version == 2 && upgraded.apps == c.apps && upgraded.enabled == c.enabled && upgraded.systemActions.isEmpty)
+        let afterLegacyLoad = try Data(contentsOf: legacyURL)
+        precondition(afterLegacyLoad == legacyBytes)
+        legacy["version"] = 2 // A damaged v2 file must not silently lose system actions.
+        do { _ = try JSONDecoder().decode(AppShortcutConfiguration.self, from: JSONSerialization.data(withJSONObject: legacy)); preconditionFailure("missing v2 actions accepted") } catch {}
+
+        let mehL = TapShortcut(keyCode: 37, label: "⌃⌥⇧L", modifiers: CGEventFlags([.maskControl, .maskAlternate, .maskShift]).rawValue)
+        var lock = SystemShortcut(shortcut: mehL)
+        var combined = c; combined.systemActions = [lock]
+        try combined.validate()
+        let systemURL = directory.appendingPathComponent("system.json")
+        try AppShortcutStore.save(combined, to: systemURL)
+        let roundTrip = try AppShortcutStore.load(from: systemURL)
+        precondition(roundTrip == combined)
+        var duplicate = combined; duplicate.systemActions[0].shortcut = a.shortcut; rejects(duplicate)
+        duplicate.systemActions[0].enabled = false; try duplicate.validate()
+        duplicate = combined; duplicate.systemActions.append(lock); rejects(duplicate)
+        duplicate = combined; duplicate.systemActions[0].id = a.id; rejects(duplicate)
+        duplicate = combined; duplicate.systemActions[0].shortcut.modifiers = CGEventFlags.maskShift.rawValue; rejects(duplicate)
+        duplicate = combined; duplicate.systemActions[0].shortcut.keyCode = 79; rejects(duplicate)
+        duplicate = combined; duplicate.systemActions[0].shortcut.modifiers |= 1; rejects(duplicate)
+        lock.id = UUID(); duplicate = combined; duplicate.systemActions.append(lock); rejects(duplicate)
+        var unknown = try JSONSerialization.jsonObject(with: JSONEncoder().encode(combined)) as! [String: Any]
+        var actions = unknown["systemActions"] as! [[String: Any]]
+        actions[0]["action"] = "unsupported"; unknown["systemActions"] = actions
+        do { _ = try JSONDecoder().decode(AppShortcutConfiguration.self, from: JSONSerialization.data(withJSONObject: unknown)); preconditionFailure("unknown action accepted") } catch {}
+
+        let systemRegistry = FakeRegistry(); let executor = FakeSystemExecutor()
+        var systemMarked = 0
+        let systemModel = AppShortcutModel(registry: systemRegistry, storageURL: systemURL, systemExecutor: executor,
+            resolve: { URL(fileURLWithPath: $0.applicationPath) }, launch: { _, _ in preconditionFailure("system action opened app") })
+        systemModel.onHotKeyActivation = { systemMarked += 1 }
+        systemModel.setContext(allEnabled: true, inputRecording: false)
+        precondition(systemRegistry.actions.count == 3)
+        systemRegistry.actions.last!()
+        let expectedLockPlan = try SystemShortcutExecutor.makePlan(for: combined.systemActions[0])
+        precondition(executor.executed == [expectedLockPlan] && systemMarked == 1)
+        let queuedBeforeDisable = systemRegistry.actions.last!
+        systemModel.update { $0.enabled = false }; queuedBeforeDisable()
+        precondition(executor.executed.count == 1 && systemRegistry.actions.isEmpty)
+        systemModel.update { $0.enabled = true }
+        let lockDown = CGEvent(keyboardEventSource: nil, virtualKey: 37, keyDown: true)!
+        lockDown.flags = CGEventFlags(rawValue: mehL.modifiers)
+        let lockUp = CGEvent(keyboardEventSource: nil, virtualKey: 37, keyDown: false)!
+        precondition(systemModel.handleMappedKey(.keyDown, lockDown, mappingActive: true))
+        precondition(systemModel.handleMappedKey(.keyDown, lockDown, mappingActive: true))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        precondition(executor.executed.count == 2 && systemMarked == 2, "held mapped key fires once")
+        precondition(systemModel.handleMappedKey(.keyUp, lockUp, mappingActive: false))
+        precondition(systemModel.handleMappedKey(.keyDown, lockDown, mappingActive: true))
+        systemModel.recording = true
+        RunLoop.current.run(until: Date().addingTimeInterval(0.03))
+        precondition(executor.executed.count == 2, "recording cancels a queued lock")
+        precondition(systemModel.handleMappedKey(.keyUp, lockUp, mappingActive: false))
+        systemModel.recording = false
+        let beforeSystemStop = systemRegistry.actions.last!
+        systemModel.stop(); beforeSystemStop()
+        precondition(executor.executed.count == 2)
+        executor.availability = "permission missing"
+        systemModel.setContext(allEnabled: true, inputRecording: false)
+        precondition(systemRegistry.actions.count == 2 && systemModel.issues[combined.systemActions[0].id] == "permission missing")
+        executor.availability = nil; systemRegistry.conflictCode = 37
+        systemModel.setContext(allEnabled: true, inputRecording: false)
+        precondition(systemRegistry.actions.count == 2 && !systemModel.handleMappedKey(.keyDown, lockDown, mappingActive: true))
+        systemRegistry.conflictCode = nil; executor.failure = "dispatch failed"
+        systemModel.setContext(allEnabled: true, inputRecording: false)
+        systemRegistry.actions.last!()
+        precondition(systemModel.issues[combined.systemActions[0].id] == "dispatch failed")
+        systemModel.updateSystemAction(combined.systemActions[0].id) { $0.enabled = false }
+        precondition(systemRegistry.actions.count == 2)
+        let lockCommand = TapShortcut(keyCode: 12, label: "⌃⌘Q", modifiers: CGEventFlags([.maskControl, .maskCommand]).rawValue)
+        precondition(AppHotKeyRegistry().register(lockCommand, action: { preconditionFailure() }) != nil, "native lock command cannot recursively bind")
+
+        // Construct only; never post or lock the test machine.
+        let restoreFlags: CGEventFlags = [.maskAlternate, .maskShift, .maskAlphaShift]
+        let lockEvents = SystemShortcutExecutor.lockEvents(restoring: restoreFlags)
+        precondition(lockEvents.count == 3)
+        precondition(lockEvents[0].type == .keyDown && lockEvents[1].type == .keyUp && lockEvents[2].type == .flagsChanged)
+        for event in lockEvents.prefix(2) {
+            precondition(event.getIntegerValueField(.keyboardEventKeycode) == 12 && event.flags == [.maskControl, .maskCommand], "Meh modifiers cannot pollute lock command")
+        }
+        precondition(lockEvents[2].flags == restoreFlags)
+        precondition(lockEvents.allSatisfy { $0.getIntegerValueField(.eventSourceUserData) == SystemShortcutExecutor.eventMarker })
+
+        // Every action has an explicit route. Only construct events; never dispatch
+        // screenshots, media, input-source changes, display sleep or system sleep.
+        let command = CGEventFlags.maskCommand.rawValue
+        let control = CGEventFlags.maskControl.rawValue
+        let shift = CGEventFlags.maskShift.rawValue
+        let keyRoutes: [(SystemShortcutAction, UInt16, UInt64)] = [
+            (.lockScreen, 12, control | command), (.screenshotRegion, 21, command | shift),
+            (.screenshotFull, 20, command | shift), (.showDesktop, 103, 0),
+            (.previousSpace, 123, control), (.nextSpace, 124, control),
+            (.toggleFullScreen, 3, control | command), (.emojiPicker, 49, control | command)
+        ]
+        for (action, key, modifiers) in keyRoutes {
+            let plan = try SystemShortcutExecutor.makePlan(for: SystemShortcut(action: action))
+            guard case .keyboard(let output) = plan else { preconditionFailure("wrong keyboard route") }
+            precondition(output.keyCode == key && output.modifiers == modifiers)
+            let events = SystemShortcutExecutor.keyboardEvents(output, restoring: restoreFlags)
+            precondition(events.count == 3 && events[0].type == .keyDown && events[1].type == .keyUp)
+            precondition(events.prefix(2).allSatisfy { $0.flags.rawValue == modifiers && $0.getIntegerValueField(.keyboardEventKeycode) == Int64(key) })
+            precondition(events[2].type == .flagsChanged && events[2].flags == restoreFlags)
+            precondition(events.allSatisfy { $0.getIntegerValueField(.eventSourceUserData) == SystemShortcutExecutor.eventMarker })
+        }
+        let mediaRoutes: [(SystemShortcutAction, Int)] = [(.volumeUp, 0), (.volumeDown, 1), (.mute, 7),
+            (.brightnessUp, 2), (.brightnessDown, 3), (.playPause, 16), (.nextTrack, 17), (.previousTrack, 18)]
+        for (action, code) in mediaRoutes {
+            let plan = try SystemShortcutExecutor.makePlan(for: SystemShortcut(action: action))
+            precondition(plan == .mediaKey(code))
+            let events = SystemShortcutExecutor.mediaEvents(code, restoring: restoreFlags)
+            precondition(events.count == 3)
+            for (index, state) in [0xA00, 0xB00].enumerated() {
+                let event = NSEvent(cgEvent: events[index])!
+                precondition(event.type == .systemDefined && event.subtype.rawValue == 8)
+                precondition(event.data1 == (code << 16) | state && event.data2 == -1)
+                precondition(event.modifierFlags.intersection([.control, .option, .command, .shift]).isEmpty, "held Meh cannot pollute media keys")
+            }
+            precondition(events[2].flags == restoreFlags)
+            precondition(events.allSatisfy { $0.getIntegerValueField(.eventSourceUserData) == SystemShortcutExecutor.eventMarker })
+        }
+        let otherRoutes: [(SystemShortcutAction, SystemActionPlan)] = [
+            (.screenshotToolbar, .openApplication("com.apple.screenshot.launcher")),
+            (.missionControl, .openApplication("com.apple.exposelauncher")),
+            (.spotlight, .openApplication("com.apple.Spotlight")),
+            (.switchInputSource, .switchInputSource), (.displaySleep, .displaySleep), (.systemSleep, .systemSleep)]
+        for (action, expected) in otherRoutes {
+            let plan = try SystemShortcutExecutor.makePlan(for: SystemShortcut(action: action))
+            precondition(plan == expected && plan.outputShortcut == nil)
+        }
+        precondition(keyRoutes.count + mediaRoutes.count + otherRoutes.count + 1 == SystemShortcutAction.allCases.count)
+
+        // Custom outputs retain old v2 lock-only files and fail closed on cycles.
+        var custom = SystemShortcut(action: .sendShortcut, shortcut: mehL)
+        do { _ = try SystemShortcutExecutor.makePlan(for: custom); preconditionFailure("empty output accepted") } catch {}
+        custom.targetShortcut = TapShortcut(keyCode: 8, label: "⌘C", modifiers: command)
+        let customPlan = try SystemShortcutExecutor.makePlan(for: custom)
+        precondition(customPlan == .keyboard(custom.targetShortcut!))
+        var customConfig = c; customConfig.systemActions = [custom]
+        try customConfig.validate()
+        let customDecoded = try JSONDecoder().decode(AppShortcutConfiguration.self, from: JSONEncoder().encode(customConfig))
+        precondition(customDecoded == customConfig)
+        customConfig.systemActions[0].targetShortcut = mehL; rejects(customConfig)
+        customConfig.systemActions[0].targetShortcut = a.shortcut; rejects(customConfig)
+        customConfig.apps[0].enabled = false; try customConfig.validate()
+        customConfig = c; customConfig.systemActions = [custom]
+        for code: UInt16 in [54, 57, 63, 79, 128] {
+            customConfig.systemActions[0].targetShortcut?.keyCode = code; rejects(customConfig)
+        }
+        customConfig.systemActions[0].targetShortcut = TapShortcut(keyCode: 49, label: "Space", modifiers: 0)
+        try customConfig.validate() // Bare ordinary output keys are allowed.
+        customConfig.systemActions[0].targetShortcut?.modifiers = 1; rejects(customConfig)
+        var allActions = AppShortcutConfiguration()
+        allActions.systemActions = SystemShortcutAction.allCases.map { SystemShortcut(action: $0) }
+        try allActions.validate()
+        let allDecoded = try JSONDecoder().decode(AppShortcutConfiguration.self, from: JSONEncoder().encode(allActions))
+        precondition(allDecoded == allActions)
+
+        // A built-in output must not activate another registered MacTools binding.
+        var builtInCollision = combined
+        builtInCollision.apps[0].shortcut = TapShortcut(keyCode: 3, label: "⌃⌘F", modifiers: command | control)
+        builtInCollision.systemActions[0].action = .toggleFullScreen
+        try AppShortcutStore.save(builtInCollision, to: systemURL)
+        let routeRegistry = FakeRegistry(); let routeExecutor = FakeSystemExecutor()
+        let routeModel = AppShortcutModel(registry: routeRegistry, storageURL: systemURL, systemExecutor: routeExecutor,
+            resolve: { URL(fileURLWithPath: $0.applicationPath) }, launch: { _, _ in })
+        routeModel.setContext(allEnabled: true, inputRecording: false)
+        precondition(routeRegistry.actions.count == 2 && routeModel.issues[builtInCollision.systemActions[0].id] != nil)
+        routeModel.updateApp(builtInCollision.apps[0].id) { $0.enabled = false }
+        precondition(routeRegistry.actions.count == 2 && routeModel.issues[builtInCollision.systemActions[0].id] == nil)
+        routeExecutor.deferred = true
+        let asyncAction = routeRegistry.actions.last!
+        asyncAction(); asyncAction()
+        precondition(routeExecutor.executed.count == 1 && routeExecutor.completions.count == 1, "deduplicate asynchronous system requests")
+        routeExecutor.completions.removeFirst()("request rejected")
+        precondition(routeModel.issues[builtInCollision.systemActions[0].id] == "request rejected")
+        asyncAction()
+        precondition(routeExecutor.executed.count == 2)
+        routeModel.stop()
+        routeExecutor.completions.removeFirst()("stale error")
+        precondition(routeModel.issues[builtInCollision.systemActions[0].id] != "stale error")
+        routeExecutor.availability = "permission revoked"
+        routeModel.setContext(allEnabled: true, inputRecording: false)
+        precondition(routeRegistry.actions.count == 1)
+        routeExecutor.availability = nil
+        routeModel.setContext(allEnabled: true, inputRecording: false)
+        let beforeRevoke = routeRegistry.actions.last!
+        routeExecutor.availability = "permission revoked"; beforeRevoke()
+        precondition(routeExecutor.executed.count == 2 && routeModel.issues[builtInCollision.systemActions[0].id] == "permission revoked", "recheck availability at invocation")
+
+        // A recorder must not arm a newly chosen lock action while its key is held.
+        let recorder = RecorderField()
+        var recordings: [TapShortcut] = []
+        recorder.onFocus = { systemModel.recording = $0 }
+        recorder.onRecord = { recordings.append($0); systemModel.recording = false }
+        func recordedEvent(_ type: NSEvent.EventType, code: UInt16 = 37, repeatKey: Bool = false) -> NSEvent {
+            NSEvent.keyEvent(with: type, location: .zero, modifierFlags: [.control, .option, .shift], timestamp: 0,
+                windowNumber: 0, context: nil, characters: "L", charactersIgnoringModifiers: "l", isARepeat: repeatKey, keyCode: code)!
+        }
+        precondition(recorder.becomeFirstResponder())
+        recorder.keyDown(with: recordedEvent(.keyDown))
+        recorder.keyDown(with: recordedEvent(.keyDown, repeatKey: true))
+        precondition(recordings.isEmpty && systemModel.recording && systemRegistry.actions.isEmpty)
+        recorder.keyUp(with: recordedEvent(.keyUp, code: 0))
+        precondition(recordings.isEmpty && systemModel.recording, "unrelated key-up cannot finish")
+        recorder.keyUp(with: recordedEvent(.keyUp))
+        precondition(recordings == [mehL] && !systemModel.recording)
+        _ = recorder.becomeFirstResponder()
+        recorder.keyDown(with: recordedEvent(.keyDown))
+        _ = recorder.resignFirstResponder()
+        recorder.keyUp(with: recordedEvent(.keyUp))
+        precondition(recordings.count == 1, "focus loss cancels pending chord")
+        _ = recorder.becomeFirstResponder()
+        recorder.keyDown(with: recordedEvent(.keyDown))
+        ShortcutRecorder.dismantleNSView(recorder, coordinator: ())
+        recorder.keyUp(with: recordedEvent(.keyUp))
+        precondition(recordings.count == 1 && !systemModel.recording, "leaving a page cancels pending chord")
+        print("AppShortcutTests: all tests passed (fake registry, launcher and system executor; no user settings, posted input or screen lock)")
     }
 }

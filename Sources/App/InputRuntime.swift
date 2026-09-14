@@ -219,7 +219,8 @@ final class InputRuntime: ObservableObject {
             }
             return Unmanaged.passUnretained(event)
         }
-        guard event.getIntegerValueField(.eventSourceUserData) != Self.marker else { return Unmanaged.passUnretained(event) }
+        let marker = event.getIntegerValueField(.eventSourceUserData)
+        guard marker != Self.marker && marker != SystemShortcutExecutor.eventMarker else { return Unmanaged.passUnretained(event) }
         if hyperRunning {
             let code = UInt16(event.getIntegerValueField(.keyboardEventKeycode))
             if [.keyDown, .keyUp, .flagsChanged].contains(type), let mapping = mappings.first(where: { $0.enabled && $0.trigger.keyCode == code }) {

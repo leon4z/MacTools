@@ -4,13 +4,14 @@ import UniformTypeIdentifiers
 
 @MainActor final class AppShortcutModel: ObservableObject {
     @Published private(set) var configuration = AppShortcutConfiguration()
-    @Published private(set) var status = "未开启应用快捷键。"
+    @Published private(set) var status = "未开启快捷键。"
     @Published private(set) var issues: [UUID: String] = [:]
     @Published var errorMessage: String?
     @Published private(set) var configurationLoaded = false
     @Published var recording = false { didSet { apply() } }
     var onHotKeyActivation: (() -> Void)?
     private let registry: AppHotKeyRegistering
+    private let systemExecutor: SystemShortcutExecuting
     private let storageURL: URL
     private let resolve: (AppShortcut) -> URL?
     private let launch: (URL, @escaping (String?) -> Void) -> Void
@@ -26,6 +27,7 @@ import UniformTypeIdentifiers
     private var registrationIssues: [UUID: String] = [:]
 
     init(registry: AppHotKeyRegistering? = nil, storageURL: URL = AppShortcutStore.url,
+         systemExecutor: SystemShortcutExecuting? = nil,
          resolve: @escaping (AppShortcut) -> URL? = AppShortcutModel.resolveApplication,
          frontmostBundleIdentifier: @escaping () -> String? = { NSWorkspace.shared.frontmostApplication?.bundleIdentifier },
          hideFrontmost: @escaping (String) -> Bool = { identifier in
@@ -39,6 +41,7 @@ import UniformTypeIdentifiers
              }
          }) {
         self.registry = registry ?? AppHotKeyRegistry(); self.storageURL = storageURL; self.resolve = resolve; self.launch = launch
+        self.systemExecutor = systemExecutor ?? SystemShortcutExecutor()
         self.frontmostBundleIdentifier = frontmostBundleIdentifier; self.hideFrontmost = hideFrontmost
         reloadConfiguration()
     }
@@ -50,7 +53,7 @@ import UniformTypeIdentifiers
         } catch {
             configurationLoaded = false
             stop()
-            errorMessage = "无法读取应用快捷键配置：" + error.localizedDescription
+            errorMessage = "无法读取快捷键配置：" + error.localizedDescription
         }
     }
     nonisolated static func resolveApplication(_ app: AppShortcut) -> URL? {
@@ -96,6 +99,13 @@ import UniformTypeIdentifiers
     func updateApp(_ id: UUID, _ change: (inout AppShortcut) -> Void) {
         update { value in if let index = value.apps.firstIndex(where: { $0.id == id }) { change(&value.apps[index]) } }
     }
+    func updateSystemAction(_ id: UUID, _ change: (inout SystemShortcut) -> Void) {
+        update { value in if let index = value.systemActions.firstIndex(where: { $0.id == id }) { change(&value.systemActions[index]) } }
+    }
+    func addSystemAction(_ action: SystemShortcutAction) {
+        recording = false
+        update { $0.systemActions.append(SystemShortcut(action: action)) }
+    }
     func addApplication() {
         recording = false
         let panel = NSOpenPanel(); panel.title = "选择要设置快捷键的应用"
@@ -136,14 +146,29 @@ import UniformTypeIdentifiers
             else { self.issues[app.id] = self.registrationIssues[app.id] }
         }
     }
+    private func checkedPlan(for item: SystemShortcut) throws -> SystemActionPlan {
+        let plan = try systemExecutor.plan(for: item)
+        if let output = plan.outputShortcut, let code = output.keyCode {
+            let target = Self.chord(code, output.modifiers)
+            let triggers = configuration.apps.filter(\.enabled).map(\.shortcut)
+                + configuration.systemActions.filter(\.enabled).map(\.shortcut)
+            if triggers.contains(where: { shortcut in
+                shortcut.keyCode.map { Self.chord($0, shortcut.modifiers) == target } ?? false
+            }) {
+                throw AppShortcutError.message("此操作输出的组合键与 MacTools 已启用的绑定重复，请修改绑定，避免循环触发。")
+            }
+        }
+        return plan
+    }
+
     private func apply() {
         // Keep already-consumed downs paired with their eventual key-up even
         // when this module is disabled or its recorder is entered mid-press.
         generation += 1; registry.unregisterAll(); mappedActions.removeAll(); launching.removeAll(); issues = [:]; registrationIssues = [:]
         guard configurationLoaded else { status = "等待重新连接原有配置。"; return }
         guard !suspended, allEnabled else { status = "全部增强已停用。"; return }
-        guard configuration.enabled else { status = "未开启应用快捷键。"; return }
-        guard !recording, !inputRecording else { status = "正在录制，应用快捷键暂时停用。"; return }
+        guard configuration.enabled else { status = "未开启快捷键。"; return }
+        guard !recording, !inputRecording else { status = "正在录制，快捷键暂时停用。"; return }
         var registered = 0
         for app in configuration.apps where app.enabled {
             guard app.shortcut.keyCode != nil else { issues[app.id] = "尚未设置快捷键"; continue }
@@ -160,7 +185,31 @@ import UniformTypeIdentifiers
                 mappedActions[Self.chord(app.shortcut.keyCode!, app.shortcut.modifiers)] = action
             }
         }
+        for item in configuration.systemActions where item.enabled {
+            guard item.shortcut.keyCode != nil else { issues[item.id] = "尚未设置快捷键"; continue }
+            do { _ = try checkedPlan(for: item) } catch { issues[item.id] = error.localizedDescription; continue }
+            let token = generation
+            let action: () -> Void = { [weak self] in
+                guard let self, token == self.generation else { return }
+                guard !self.launching.contains(item.id) else { return }
+                do {
+                    let plan = try self.checkedPlan(for: item)
+                    self.onHotKeyActivation?()
+                    self.launching.insert(item.id)
+                    self.systemExecutor.execute(plan) { [weak self] error in
+                        guard let self, token == self.generation else { return }
+                        self.launching.remove(item.id)
+                        self.issues[item.id] = error
+                    }
+                } catch { self.issues[item.id] = error.localizedDescription }
+            }
+            if let error = registry.register(item.shortcut, action: action) { issues[item.id] = error }
+            else {
+                registered += 1
+                mappedActions[Self.chord(item.shortcut.keyCode!, item.shortcut.modifiers)] = action
+            }
+        }
         registrationIssues = issues
-        status = "已启用 \(registered) 个应用快捷键" + (issues.isEmpty ? "。" : "，\(issues.count) 项需要处理。")
+        status = "已启用 \(registered) 个快捷键" + (issues.isEmpty ? "。" : "，\(issues.count) 项需要处理。")
     }
 }

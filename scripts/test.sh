@@ -17,7 +17,7 @@ run_test MoveServiceTests Sources/Shared/ToolConfiguration.swift Sources/Shared/
 run_test StandaloneMenuTests Sources/App/StandaloneMenuContext.swift
 run_test InputPolicyTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/App/InputPolicies.swift
 run_test TapShortcutEventsTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/ShortcutPresets.swift Sources/App/InputPolicies.swift Sources/App/TapShortcutEvents.swift
-run_test AppShortcutTests -framework Carbon Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/AppShortcutConfiguration.swift Sources/App/AppHotKeyRegistry.swift Sources/App/AppShortcutModel.swift
+run_test AppShortcutTests -framework IOKit -framework Carbon Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/AppShortcutConfiguration.swift Sources/App/AppHotKeyRegistry.swift Sources/App/SystemShortcutExecutor.swift Sources/App/AppShortcutModel.swift Sources/App/ShortcutRecorder.swift
 run_test PropertyLeaseTests Sources/App/PropertyLeaseJournal.swift
 run_test CapsLockMappingTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/App/PropertyLeaseJournal.swift Sources/App/HIDSettingsLease.swift
 run_test MouseScrollProcessorTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift Sources/App/MouseScrollRuntime.swift

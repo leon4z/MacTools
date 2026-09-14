@@ -1,11 +1,32 @@
 import Foundation
 import IOKit
 
+@MainActor protocol HIDSettingsLeasing: AnyObject {
+    var services: [IOHIDServiceClient] { get }
+    var keyboardServiceIDs: Set<String> { get }
+    var mouseServiceIDs: Set<String> { get }
+    var mice: [IOHIDServiceClient] { get }
+    var keyboards: [IOHIDServiceClient] { get }
+    var ownershipState: PropertyLeaseOwnership { get }
+    func id(_ service: IOHIDServiceClient) -> String
+    func property(_ service: IOHIDServiceClient, _ key: String) -> Any?
+    func name(_ service: IOHIDServiceClient) -> String
+    func set(_ service: IOHIDServiceClient, key: String, value: Any, missingDefault: Any, force: Bool) throws
+    func refreshServices()
+    func recover() throws
+    func restore() throws
+}
+
+@MainActor protocol CapsLockLeasing: AnyObject {
+    var lease: any HIDSettingsLeasing { get }
+    func enable() throws
+}
+
 /// Own only the property values we wrote. Restore by compare-and-swap so that
 /// another utility's later settings are never overwritten. Journal BEFORE write.
 @MainActor
-final class HIDSettingsLease {
-    private let client = IOHIDEventSystemClientCreate(kCFAllocatorDefault)
+final class HIDSettingsLease: HIDSettingsLeasing {
+    private var client = IOHIDEventSystemClientCreate(kCFAllocatorDefault)
     private let journalURL: URL
     private lazy var journal = PropertyLeaseJournal(url: journalURL, bootID: Self.bootID(),
         available: { [unowned self] in Set(self.services.map { self.id($0) }) },
@@ -38,6 +59,11 @@ final class HIDSettingsLease {
         guard let client else { return [] }
         return IOHIDEventSystemClientCopyServices(client) as? [IOHIDServiceClient] ?? []
     }
+    // A new connection provides a current inventory after wake/re-enumeration.
+    // Journal closures intentionally resolve against this replaceable client.
+    func refreshServices() { client = IOHIDEventSystemClientCreate(kCFAllocatorDefault) }
+    var keyboardServiceIDs: Set<String> { Set(keyboards.map { id($0) }) }
+    var mouseServiceIDs: Set<String> { Set(mice.map { id($0) }) }
     func id(_ service: IOHIDServiceClient) -> String { String(describing: IOHIDServiceClientGetRegistryID(service)) }
     func property(_ service: IOHIDServiceClient, _ key: String) -> Any? { IOHIDServiceClientCopyProperty(service, key as CFString) }
     func name(_ service: IOHIDServiceClient) -> String { property(service, "Product") as? String ?? "鼠标设备" }
@@ -56,12 +82,15 @@ final class HIDSettingsLease {
     func recover() throws { try journal.recover() }
     func restore() throws { try journal.restore() }
     var ownershipIntact: Bool { journal.ownershipIntact }
+    var ownershipState: PropertyLeaseOwnership { journal.ownershipState }
 
 }
 
 enum HIDFailure: LocalizedError {
-    case message(String)
-    var errorDescription: String? { if case .message(let text) = self { return text }; return nil }
+    case message(String), conflict(String)
+    var errorDescription: String? {
+        switch self { case .message(let text), .conflict(let text): return text }
+    }
 }
 
 /// Plans a reversible Caps Lock remap without changing any device.
@@ -75,7 +104,7 @@ enum CapsLockMapping {
             let dst = (item["HIDKeyboardModifierMappingDst"] as? NSNumber)?.uint64Value
             if src == dst && (src == source || src == destination) { continue }
             if src == source || src == destination || dst == destination {
-                throw HIDFailure.message("Caps Lock 或 F18 已映射到其他按键，请先移除冲突映射，再重新检查。")
+                throw HIDFailure.conflict("Caps Lock 或 F18 已映射到其他按键，请先移除冲突映射，再重新检查。")
             }
             result.append(item)
         }
@@ -85,8 +114,9 @@ enum CapsLockMapping {
 }
 
 @MainActor
-final class CapsLockLease {
-    let lease = HIDSettingsLease(name: "keyboard")
+final class CapsLockLease: CapsLockLeasing {
+    let lease: any HIDSettingsLeasing
+    init(lease: (any HIDSettingsLeasing)? = nil) { self.lease = lease ?? HIDSettingsLease(name: "keyboard") }
     func enable() throws {
         let keyboards = lease.keyboards
         guard !keyboards.isEmpty else { throw HIDFailure.message("未检测到可配置键盘。") }
@@ -96,7 +126,7 @@ final class CapsLockLease {
             return (service, try CapsLockMapping.replacingIdentity(in: original))
         }
         for (service, map) in plans {
-            try lease.set(service, key: "UserKeyMapping", value: map, missingDefault: [[String: Any]]())
+            try lease.set(service, key: "UserKeyMapping", value: map, missingDefault: [[String: Any]](), force: false)
         }
     }
 }

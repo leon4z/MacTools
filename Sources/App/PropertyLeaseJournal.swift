@@ -1,5 +1,7 @@
 import Foundation
 
+enum PropertyLeaseOwnership: Equatable { case intact, unavailable, changed }
+
 /// Device-agnostic recovery transaction; testable without touching any HID state.
 final class PropertyLeaseJournal {
     private let url: URL
@@ -86,18 +88,22 @@ final class PropertyLeaseJournal {
         try persist()
         if failed { throw failure("部分设备参数尚未恢复，请重新检查。") }
     }
-    var ownershipIntact: Bool {
+    var ownershipIntact: Bool { ownershipState == .intact }
+    var ownershipState: PropertyLeaseOwnership {
         let online = available()
-        return records.allSatisfy { e in
+        var unavailable = false
+        for e in records {
             let id = e["id"] as! String, key = e["key"] as! String
-            if !online.contains(id) { return true }
+            if !online.contains(id) { continue }
+            guard let current = read(id, key) else { unavailable = true; continue }
             if key == "UserKeyMapping", let before = e["original"] as? [[String: Any]],
-               let ours = e["written"] as? [[String: Any]], let now = read(id, key) as? [[String: Any]] {
+               let ours = e["written"] as? [[String: Any]], let now = current as? [[String: Any]] {
                 let additions = ours.filter { item in !before.contains(where: { Self.equal($0, item) }) }
-                return additions.allSatisfy { item in now.contains(where: { Self.equal($0, item) }) }
-            }
-            return Self.equal(read(id, key) ?? NSNull(), e["written"]!)
+                if !additions.allSatisfy({ item in now.contains(where: { Self.equal($0, item) }) }) { return .changed }
+            } else if !Self.equal(current, e["written"]!) { return .changed }
         }
+        // Missing reads are not evidence that another utility took ownership.
+        return unavailable ? .unavailable : .intact
     }
     var pendingCount: Int { records.count }
     private func priority(_ entry: [String: Any]) -> Int {

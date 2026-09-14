@@ -72,6 +72,7 @@ swiftc \
   "$ROOT_DIR"/Sources/Vendor/LinearMouse/*.swift \
   "$ROOT_DIR/Sources/App/MouseScrollProcessor.swift" \
   "$ROOT_DIR/Sources/App/MouseScrollRuntime.swift" \
+  "$ROOT_DIR/Sources/App/KeyboardEventListener.swift" \
   "$ROOT_DIR/Sources/App/InputRuntime.swift" \
   "$ROOT_DIR/Sources/Shared/AppShortcutConfiguration.swift" \
   "$ROOT_DIR/Sources/App/AppHotKeyRegistry.swift" \
@@ -80,6 +81,7 @@ swiftc \
   "$ROOT_DIR/Sources/App/AppShortcutViews.swift" \
   "$ROOT_DIR/Sources/App/SharedConfigurationAccess.swift" \
   "$ROOT_DIR/Sources/App/AppUpdateModel.swift" \
+  "$ROOT_DIR/Sources/App/InputSessionLifecycle.swift" \
   "$ROOT_DIR/Sources/App/MacToolsModel.swift" \
   "$ROOT_DIR/Sources/App/MacToolsViews.swift" \
   "$ROOT_DIR/Sources/App/ShortcutRecorder.swift" \

@@ -45,7 +45,11 @@ pluginkit -r "$BUILT_APP/Contents/PlugIns/$EXTENSION_NAME" >/dev/null 2>&1 || tr
 "$LSREGISTER" -f "$INSTALLED_APP"
 pluginkit -a "$INSTALLED_APP/Contents/PlugIns/$EXTENSION_NAME"
 pluginkit -e use -i "$EXTENSION_ID"
-open "$INSTALLED_APP"
+if [ "${MACTOOLS_LAUNCH_AFTER_INSTALL:-1}" = "1" ]; then
+    open "$INSTALLED_APP"
+else
+    echo "App left closed (MACTOOLS_LAUNCH_AFTER_INSTALL=0)."
+fi
 echo "Installed: $INSTALLED_APP"
 echo "Rollback backup: $BACKUP"
 pluginkit -m -A -D -v -i "$EXTENSION_ID"

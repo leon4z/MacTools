@@ -19,6 +19,7 @@ run_test InputPolicyTests Sources/Shared/ToolConfiguration.swift Sources/Shared/
 run_test TapShortcutEventsTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/ShortcutPresets.swift Sources/App/InputPolicies.swift Sources/App/TapShortcutEvents.swift
 run_test AppShortcutTests -framework IOKit -framework Carbon Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/AppShortcutConfiguration.swift Sources/App/AppHotKeyRegistry.swift Sources/App/SystemShortcutExecutor.swift Sources/App/AppShortcutModel.swift Sources/App/ShortcutRecorder.swift
 run_test PropertyLeaseTests Sources/App/PropertyLeaseJournal.swift
+run_test InputRecoveryTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit -framework Carbon Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Shared/AppShortcutConfiguration.swift Sources/App/InputPolicies.swift Sources/App/NativeCapsLock.swift Sources/App/TapShortcutEvents.swift Sources/App/SystemShortcutExecutor.swift Sources/App/PropertyLeaseJournal.swift Sources/App/HIDSettingsLease.swift Sources/App/KeyboardEventListener.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift Sources/App/MouseScrollRuntime.swift Sources/App/InputRuntime.swift
 run_test CapsLockMappingTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/App/PropertyLeaseJournal.swift Sources/App/HIDSettingsLease.swift
 run_test MouseScrollProcessorTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift Sources/App/MouseScrollRuntime.swift
 run_test ShiftScrollTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift
@@ -29,3 +30,5 @@ swiftc -target arm64-apple-macosx26.0 Sources/Vendor/LinearMouse/Compatibility.s
 
 SPARKLE_DIR="$(bash "$ROOT_DIR/scripts/setup-sparkle.sh")"
 run_test AppUpdateTests -F "$SPARKLE_DIR" -framework Sparkle -Xlinker -rpath -Xlinker "$SPARKLE_DIR" Sources/App/AppUpdateModel.swift
+
+run_test InputSessionLifecycleTests Sources/App/InputSessionLifecycle.swift

@@ -84,6 +84,7 @@ struct HyperState {
     mutating func markUsed() {
         for key in Array(pressed.keys) { pressed[key]?.used = true }
     }
+    mutating func cancel(code: UInt16) { pressed.removeValue(forKey: code) }
     mutating func reset() { pressed.removeAll() }
     func outputFlags(raw: CGEventFlags, mappings: [ModifierMapping], apply: Bool) -> CGEventFlags {
         var result = raw

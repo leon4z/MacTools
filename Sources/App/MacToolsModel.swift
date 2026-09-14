@@ -9,11 +9,11 @@ final class MacToolsModel: ObservableObject {
     @Published var recording = false { didSet { scheduleApply() } }
     let updates = AppUpdateModel()
     private var suspendedForUpdate = false
+    private let lifecycle = InputSessionLifecycle()
     let input = InputRuntime()
     let appShortcuts = AppShortcutModel()
     private let standalone: StandaloneMenuController
     private var pending: DispatchWorkItem?
-    private var observers: [NSObjectProtocol] = []
     init(standalone: StandaloneMenuController) {
         self.standalone = standalone
         input.mappedShortcutHandler = { [weak self] type, event, active in
@@ -23,18 +23,17 @@ final class MacToolsModel: ObservableObject {
         do { configuration = try MacToolsConfigurationStore.load(); configurationLoaded = true }
         catch { configuration.allEnabled = false; errorMessage = "无法读取 MacTools 配置：\(error.localizedDescription)" }
         input.recover()
-        let center = NSWorkspace.shared.notificationCenter
-        observers.append(center.addObserver(forName: NSWorkspace.willSleepNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
-        })
-        observers.append(center.addObserver(forName: NSWorkspace.sessionDidResignActiveNotification, object: nil, queue: .main) { [weak self] _ in
-            MainActor.assumeIsolated { self?.stop() }
-        })
-        for name in [NSWorkspace.didWakeNotification, NSWorkspace.sessionDidBecomeActiveNotification] {
-            observers.append(center.addObserver(forName: name, object: nil, queue: .main) { [weak self] _ in
-                MainActor.assumeIsolated { self?.refresh() }
-            })
-        }
+        lifecycle.onSuspend = { [weak self] in self?.stop() }
+        lifecycle.onResume = { [weak self] in self?.scheduleWakeRecovery() }
+    }
+    private func scheduleWakeRecovery() {
+        guard lifecycle.canResume, !suspendedForUpdate else { return }
+        // Wake and session-active notifications often arrive together. Coalesce
+        // them and give USB/HID enumeration a short settling period.
+        pending?.cancel()
+        let work = DispatchWorkItem { [weak self] in self?.refresh() }
+        pending = work
+        DispatchQueue.main.asyncAfter(deadline: .now() + 0.75, execute: work)
     }
     func update(_ change: (inout MacToolsConfiguration) -> Void) {
         guard configurationLoaded else {
@@ -54,7 +53,7 @@ final class MacToolsModel: ObservableObject {
         } catch { errorMessage = error.localizedDescription }
     }
     private func scheduleApply() {
-        guard !suspendedForUpdate else { return }
+        guard !suspendedForUpdate, lifecycle.canResume else { return }
         pending?.cancel()
         if recording { appShortcuts.setContext(allEnabled: configuration.allEnabled, inputRecording: true); input.stop(); return }
         let work = DispatchWorkItem { [weak self] in self?.refresh() }
@@ -62,7 +61,7 @@ final class MacToolsModel: ObservableObject {
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.25, execute: work)
     }
     func refresh() {
-        guard !suspendedForUpdate else { return }
+        guard !suspendedForUpdate, lifecycle.canResume else { return }
         pending?.cancel()
         standalone.refresh()
         appShortcuts.stop()

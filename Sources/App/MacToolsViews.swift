@@ -146,6 +146,11 @@ private struct MouseSettingsPage: View {
     private func binding<T>(_ key: WritableKeyPath<MousePreferences, T>) -> Binding<T> {
         Binding(get: { model.configuration.mouse[keyPath: key] }, set: { value in model.update { $0.mouse[keyPath: key] = value } })
     }
+    private func modifierBinding<T>(_ modifier: WheelModifier, _ key: WritableKeyPath<WheelModifierRule, T>) -> Binding<T> {
+        Binding(get: { model.configuration.mouse.modifiers[modifier][keyPath: key] }, set: { value in
+            model.update { $0.mouse.modifiers[modifier][keyPath: key] = value }
+        })
+    }
     var body: some View {
         ScrollView {
             VStack(spacing: 20) {
@@ -168,6 +173,33 @@ private struct MouseSettingsPage: View {
                             Text("相对于当前系统方向反转。仅处理普通鼠标离散滚轮；触控板和连续高精度滚动保持原样。")
                                 .font(.caption).foregroundStyle(.secondary)
                         }
+                    }
+                    GroupBox("修饰键＋滚轮") {
+                        VStack(alignment: .leading, spacing: 16) {
+                            ForEach(WheelModifier.allCases) { modifier in
+                                VStack(alignment: .leading, spacing: 10) {
+                                    HStack(spacing: 16) {
+                                        Text(modifier.title).frame(width: 100, alignment: .leading)
+                                        Picker(modifier.title, selection: modifierBinding(modifier, \.action)) {
+                                            ForEach(WheelModifierAction.allCases) { Text($0.title).tag($0) }
+                                        }
+                                        .labelsHidden()
+                                        .pickerStyle(.menu)
+                                        .frame(width: 180)
+                                        .accessibilityLabel("\(modifier.title)＋滚轮")
+                                        Spacer(minLength: 0)
+                                    }
+                                    if model.configuration.mouse.modifiers[modifier].action == .changeSpeed {
+                                        settingSlider("速度倍率", value: modifierBinding(modifier, \.speed), range: 0.1...5, suffix: "倍")
+                                    }
+                                }
+                            }
+                            Text("同时按住多个修饰键时交给应用处理。“交给应用处理”保留原始滚轮，不应用平滑、速度或反向设置。速度倍率叠加到滚动速度。")
+                                .font(.caption).foregroundStyle(.secondary)
+                            Text("缩放发送 ⌘＋／⌘－，滚动时逐步缩放，实际效果取决于应用支持。仅适用于普通鼠标滚轮。")
+                                .font(.caption).foregroundStyle(.secondary)
+                        }
+                        .disabled(!model.configuration.mouse.scrolling)
                     }
                     GroupBox("试试滚动") {
                         ScrollView { VStack(alignment: .leading, spacing: 12) { ForEach(1...24, id: \.self) { Text("\($0)  在这里滚动，感受速度与停止时的过渡。") } }.frame(maxWidth: .infinity, alignment: .leading) }.frame(height: 120)

@@ -94,10 +94,10 @@ private final class Document: NSView { override var isFlipped: Bool { true } }
         var flagOutputs: [CGEventFlags] = []
         let changedFlags = MouseScrollProcessor(preferences: p, now: { time }, sink: { flagOutputs.append($0.flags); return true }, schedule: { _ in {} })
         let first = wheel(); first.flags = []
-        let second = wheel(); second.flags = .maskShift
-        _ = changedFlags.transform(first); _ = changedFlags.transform(second)
+        let second = wheel(); second.flags = .maskControl
+        _ = changedFlags.transform(first); let passedControl = changedFlags.transform(second)
         for _ in 0..<600 { time += 1.0/120; changedFlags.tick() }
-        try check(flagOutputs.contains([]) && flagOutputs.contains(.maskShift), "flag boundary delivers both original and new sequence")
+        try check(flagOutputs == [[]] && passedControl === second && second.flags == .maskControl, "application modifier flushes old sequence and passes new input unchanged")
         var overflowOutputs = 0
         let stalled = MouseScrollProcessor(preferences: p, now: { time }, sink: { _ in overflowOutputs += 1; return true }, schedule: { _ in {} })
         for _ in 0..<64 { _ = stalled.transform(wheel()) }
@@ -116,7 +116,20 @@ private final class Document: NSView { override var isFlipped: Bool { true } }
         try check(laterFailure.transform(wheel()) != nil && allocatedOutputs == 1, "later preflight failure replays old tick and passes new tick")
         for _ in 0..<30 { time += 1.0/120; laterFailure.tick() }
         try check(allocatedOutputs == 1, "later preflight failure leaves no delayed tail")
-        print("MouseScrollProcessorTests: \(checks) checks passed; native AppKit scroll offset \(initialY) -> \(scroll.contentView.bounds.minY)")
+        scroll.contentView.scroll(to: NSPoint(x: 1000, y: 1000))
+        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        let shiftOrigin = scroll.contentView.bounds.origin
+        let nativeShift = MouseScrollProcessor(preferences: MousePreferences(), now: { time }, sink: { event in
+            if let decoded = NSEvent(cgEvent: event) { scroll.scrollWheel(with: decoded) }
+            return true
+        }, schedule: { _ in {} })
+        let shiftedWheel = wheel(); shiftedWheel.flags = .maskShift
+        _ = nativeShift.transform(shiftedWheel)
+        for _ in 0..<600 { time += 1.0/120; nativeShift.tick() }
+        RunLoop.current.run(until: Date().addingTimeInterval(0.1))
+        try check(scroll.contentView.bounds.minX != shiftOrigin.x && scroll.contentView.bounds.minY == shiftOrigin.y, "Shift+wheel moves native NSScrollView horizontally without competing vertical movement")
+        print("Native Shift receiver: x \(shiftOrigin.x) -> \(scroll.contentView.bounds.minX); y \(shiftOrigin.y) -> \(scroll.contentView.bounds.minY)")
+        print("MouseScrollProcessorTests: \(checks) checks passed; native vertical and horizontal receiver checks passed")
         // Only our temporary test window was shown; no events posted globally.
     }
 }

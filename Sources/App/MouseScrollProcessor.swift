@@ -10,11 +10,14 @@ final class MouseScrollProcessor {
     private let sink: EventSink
     private let schedule: (@escaping () -> Void) -> (() -> Void)?
     private let eventFactory: (Int32, Int32) -> CGEvent?
+    private let keyFactory: (CGKeyCode, Bool) -> CGEvent?
+    private let physicalFlags: () -> CGEventFlags
     private var stopTimer: (() -> Void)?
     private var engine: SmoothedScrollingEngine
     private let tuning: Scheme.Scrolling.Bidirectional<Scheme.Scrolling.Smoothed>
     private let delivery = SmoothedScrollEventDelivery()
     private var flags: CGEventFlags = []
+    private var inputFlags: CGEventFlags = []
     private var pendingOriginals: [CGEvent] = []
     private var lastInputTime: TimeInterval?
     private(set) var emittedEvents = 0
@@ -25,11 +28,15 @@ final class MouseScrollProcessor {
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
          sink: @escaping EventSink,
          schedule: @escaping (@escaping () -> Void) -> (() -> Void)?,
+         physicalFlags: @escaping () -> CGEventFlags = { CGEventSource.flagsState(.hidSystemState) },
+         keyFactory: @escaping (CGKeyCode, Bool) -> CGEvent? = { code, down in
+             CGEvent(keyboardEventSource: CGEventSource(stateID: .privateState), virtualKey: code, keyDown: down)
+         },
          eventFactory: @escaping (Int32, Int32) -> CGEvent? = { x, y in
              CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 2, wheel1: y, wheel2: x, wheel3: 0)
          }) {
         self.preferences = preferences; self.now = now; self.sink = sink
-        self.schedule = schedule; self.eventFactory = eventFactory
+        self.schedule = schedule; self.eventFactory = eventFactory; self.keyFactory = keyFactory; self.physicalFlags = physicalFlags
         // Use upstream easeInOut, with bouncing disabled: ordinary wheel output
         // needs no private synthetic trackpad gesture sequence.
         var configuration = Scheme.Scrolling.Smoothed.Preset.easeInOut.defaultConfiguration
@@ -54,13 +61,44 @@ final class MouseScrollProcessor {
         }
         guard preferences.scrolling else { return event }
         let view = ScrollWheelEventView(event)
-        guard !view.continuous, view.scrollPhase == nil, view.momentumPhase == .none else { return event }
+        guard !view.continuous, view.scrollPhase == nil, view.momentumPhase == .none else {
+            interruptSequence(); return event
+        }
+        let incomingFlags = event.flags
+        let held = WheelModifier.allCases.filter { incomingFlags.contains($0.eventFlag) }
+        // Application-owned gestures keep the original discrete event, including
+        // direction and all flags. Do not smooth shortcuts owned by another app.
+        if held.count > 1 || incomingFlags.contains(.maskSecondaryFn) {
+            interruptSequence(); return event
+        }
+        if inputFlags != incomingFlags { interruptSequence() }
+        let modifier = held.first
+        let rule = modifier.map { preferences.modifiers[$0] }
+        if rule?.action == .application { interruptSequence(); return event }
+        if rule?.action == .block { interruptSequence(); return nil }
+        if rule?.action == .zoom {
+            interruptSequence()
+            return zoom(view: view) ? nil : event
+        }
         view.negate(vertically: preferences.reverseVertical, horizontally: preferences.reverseHorizontal)
+        if let modifier, let rule {
+            switch rule.action {
+            case .changeAxis:
+                // macOS may have already moved a Shift wheel onto X. Avoid a
+                // second swap; other modifiers swap both axes explicitly.
+                let hasX = view.deltaX != 0 || view.deltaXPt != 0 || view.deltaXFixedPt != 0 || view.ioHidScrollX != 0
+                if modifier != .shift || !hasX { view.swapXY() }
+            case .changeSpeed: view.scale(factor: rule.speed)
+            default: break
+            }
+            event.flags = CGEventFlags(rawValue: incomingFlags.rawValue & ~(modifier.eventFlag.rawValue | modifier.deviceMask))
+        }
         if !preferences.smooth || bypassSmoothing {
             let current = now()
             let interval = lastInputTime.map { current - $0 } ?? 1
             let boost = interval > 0 && interval < 0.2 ? 1 + preferences.scrollAcceleration * (1 - interval / 0.2) : 1
             lastInputTime = current
+            inputFlags = incomingFlags
             view.scale(factor: preferences.scrollSpeed * boost)
             return event
         }
@@ -68,7 +106,6 @@ final class MouseScrollProcessor {
         guard x.isFinite, y.isFinite, x != 0 || y != 0 else { return event }
         // Allocate and start the output mechanism BEFORE consuming a real tick.
         guard eventFactory(0, 0) != nil, let original = event.copy() else { failOpen(); return event }
-        if flags != event.flags { interruptSequence() }
         if pendingOriginals.count >= 64 { failOpen(); return event }
         if stopTimer == nil {
             guard let cancel = schedule({ [weak self] in self?.tick() }) else {
@@ -76,11 +113,32 @@ final class MouseScrollProcessor {
             }
             stopTimer = cancel
         }
+        inputFlags = incomingFlags
         flags = event.flags
         if (x != 0) != (y != 0) { engine.resetOtherAxis(ifExclusiveIncomingAxis: x != 0 ? .horizontal : .vertical) }
         engine.feed(deltaX: x, deltaY: y, timestamp: now(), inputKind: .wheel)
         pendingOriginals.append(original)
         return nil
+    }
+
+    private func zoom(view: ScrollWheelEventView) -> Bool {
+        let vertical = delivery.deltaYInPixels(from: view)
+        let delta = vertical != 0 ? vertical : delivery.deltaXInPixels(from: view)
+        guard delta.isFinite, delta != 0 else { return false }
+        let reversed = vertical != 0 ? preferences.reverseVertical : preferences.reverseHorizontal
+        let positive = reversed ? delta < 0 : delta > 0
+        let code: CGKeyCode = positive ? 69 : 78 // Keypad plus / minus, as in LinearMouse.
+        // Allocate the full sequence before emitting any key. Match the existing
+        // system-action dispatch: command pair, then restore physical modifiers.
+        guard let down = keyFactory(code, true), let up = keyFactory(code, false),
+              let restore = keyFactory(59, false) else { return false }
+        down.flags = .maskCommand; up.flags = .maskCommand
+        restore.type = .flagsChanged; restore.flags = physicalFlags()
+        for event in [down, up, restore] { event.setIntegerValueField(.eventSourceUserData, value: Self.marker) }
+        guard sink(down) else { return false }
+        if !sink(up) { _ = sink(up) } // Best-effort release; never repeat key-down.
+        if !sink(restore) { _ = sink(restore) }
+        return true
     }
 
     func tick() {
@@ -134,6 +192,25 @@ final class MouseScrollProcessor {
         // Explicit user pause cancels the tail; never post delayed input after stop.
         stopTimer?(); stopTimer = nil
         pendingOriginals.removeAll(); delivery.resetPointDeltaRemainders()
-        engine = SmoothedScrollingEngine(smoothed: tuning); flags = []; lastInputTime = nil
+        engine = SmoothedScrollingEngine(smoothed: tuning); flags = []; inputFlags = []; lastInputTime = nil
+    }
+}
+
+private extension WheelModifier {
+    var eventFlag: CGEventFlags {
+        switch self {
+        case .shift: return .maskShift
+        case .command: return .maskCommand
+        case .option: return .maskAlternate
+        case .control: return .maskControl
+        }
+    }
+    var deviceMask: UInt64 {
+        switch self {
+        case .shift: return 0x6
+        case .command: return 0x18
+        case .option: return 0x60
+        case .control: return 0x2001
+        }
     }
 }

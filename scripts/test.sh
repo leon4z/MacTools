@@ -21,6 +21,8 @@ run_test AppShortcutTests -framework IOKit -framework Carbon Sources/Shared/Tool
 run_test PropertyLeaseTests Sources/App/PropertyLeaseJournal.swift
 run_test CapsLockMappingTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/App/PropertyLeaseJournal.swift Sources/App/HIDSettingsLease.swift
 run_test MouseScrollProcessorTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift Sources/App/MouseScrollRuntime.swift
+run_test ShiftScrollTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift
+run_test WheelModifierTests -import-objc-header Sources/App/HIDBridge.h -framework IOKit Sources/Shared/ToolConfiguration.swift Sources/Shared/MacToolsConfiguration.swift Sources/Vendor/LinearMouse/*.swift Sources/App/MouseScrollProcessor.swift
 run_test MouseEventThreadTests Sources/Vendor/LinearMouse/EventThread.swift
 swiftc -target arm64-apple-macosx26.0 Sources/Vendor/LinearMouse/Compatibility.swift Sources/Vendor/LinearMouse/Bidirectional.swift Sources/Vendor/LinearMouse/Smoothed.swift Sources/Vendor/LinearMouse/SmoothedScrollingEngine.swift Tests/Upstream/CLTAssertions.swift Tests/Upstream/SmoothedScrollingEngineTests.swift Tests/Upstream/RunLinearMouseTests.swift -o "$TEST_DIR/LinearMouseUpstreamTests"
 "$TEST_DIR/LinearMouseUpstreamTests"

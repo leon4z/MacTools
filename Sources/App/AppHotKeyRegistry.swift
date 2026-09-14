@@ -58,6 +58,11 @@ import Carbon
         if code == 12 && modifiers == UInt32(controlKey | cmdKey) {
             return "⌃⌘Q 是 macOS 锁屏快捷键，请选择其他组合。"
         }
+        // Mouse zoom emits these commands. Carbon does not expose the CGEvent
+        // marker, so reserve the pair to prevent a synthetic zoom firing an action.
+        if (code == 69 || code == 78) && modifiers == UInt32(cmdKey) {
+            return "⌘小键盘＋／－用于鼠标缩放，请选择其他组合。"
+        }
         var symbolic: Unmanaged<CFArray>?
         if CopySymbolicHotKeys(&symbolic) == noErr, let keys = symbolic?.takeRetainedValue() as? [[String: Any]],
            keys.contains(where: { ($0[kHISymbolicHotKeyEnabled as String] as? NSNumber)?.boolValue == true

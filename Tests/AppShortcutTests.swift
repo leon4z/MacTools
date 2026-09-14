@@ -259,6 +259,10 @@ import Foundation
         let lockCommand = TapShortcut(keyCode: 12, label: "⌃⌘Q", modifiers: CGEventFlags([.maskControl, .maskCommand]).rawValue)
         precondition(AppHotKeyRegistry().register(lockCommand, action: { preconditionFailure() }) != nil, "native lock command cannot recursively bind")
 
+        for code: UInt16 in [69, 78] {
+            let zoomCommand = TapShortcut(keyCode: code, label: "zoom", modifiers: CGEventFlags.maskCommand.rawValue)
+            precondition(AppHotKeyRegistry().register(zoomCommand, action: { preconditionFailure() }) != nil, "mouse zoom commands cannot recursively bind")
+        }
         // Construct only; never post or lock the test machine.
         let restoreFlags: CGEventFlags = [.maskAlternate, .maskShift, .maskAlphaShift]
         let lockEvents = SystemShortcutExecutor.lockEvents(restoring: restoreFlags)

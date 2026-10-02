@@ -73,6 +73,8 @@ MACTOOLS_SIGNING_IDENTITY=- bash scripts/build.sh
 ```
 
 首次测试或构建会从 Sparkle 官方 Release 下载固定 **2.9.6** 版本并校验 SHA-256，缓存保存在忽略的 `local/`。
+
+构建默认使用当前 macOS SDK；需要指定已安装的 SDK 时，可设置 `MACTOOLS_SDK_PATH` 为其绝对路径。
 产物位于 `build/MacTools.app`。可用 `MACTOOLS_BUILD_DIR` 指定本项目 `local/` 内以 `/build` 结尾的目录。
 `-` 表示临时签名，仅适合开发；频繁安装这种产物可能需要反复授权。
 

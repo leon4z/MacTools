@@ -413,6 +413,9 @@ struct NewFileSettingsPage: View {
 struct ExtensionSettingsPage: View {
     let openExtensionSettings: () -> Void
     let restartFinder: () -> Void
+    @State private var status = FinderExtensionStatus.unknown
+    @State private var checking = true
+    @State private var refreshID = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 18) {
@@ -423,9 +426,9 @@ struct ExtensionSettingsPage: View {
             GroupBox("当前状态") {
                 HStack(spacing: 8) {
                     Circle()
-                        .fill(FIFinderSyncController.isExtensionEnabled ? Color.green : Color.orange)
+                        .fill(checking ? Color.secondary : statusColor)
                         .frame(width: 9, height: 9)
-                    Text(FIFinderSyncController.isExtensionEnabled ? "扩展已启用" : "扩展未启用")
+                    Text(checking ? "正在检查扩展状态…" : statusText)
                     Spacer()
                 }
                 .padding(8)
@@ -434,10 +437,41 @@ struct ExtensionSettingsPage: View {
                 Button("打开扩展设置", action: openExtensionSettings)
                     .buttonStyle(.borderedProminent)
                 Button("重启 Finder", action: restartFinder)
+                Button("重新检查") { refreshID += 1 }
+                    .disabled(checking)
             }
             Spacer()
         }
         .padding(24)
+        .task(id: refreshID) {
+            checking = true
+            let result = await FinderExtensionStatus.read(
+                identifier: ToolConfigurationStore.extensionBundleIdentifier,
+                apiEnabled: FIFinderSyncController.isExtensionEnabled
+            )
+            guard !Task.isCancelled else { return }
+            status = result
+            checking = false
+        }
+        .onReceive(NotificationCenter.default.publisher(for: NSApplication.didBecomeActiveNotification)) { _ in
+            refreshID += 1
+        }
+    }
+
+    private var statusColor: Color {
+        switch status {
+        case .enabled: .green
+        case .disabled: .orange
+        case .unknown: .secondary
+        }
+    }
+
+    private var statusText: String {
+        switch status {
+        case .enabled: "扩展已启用"
+        case .disabled: "扩展未启用"
+        case .unknown: "暂时无法确认扩展状态，请在系统设置中查看。"
+        }
     }
 }
 

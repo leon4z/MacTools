@@ -10,7 +10,7 @@ if [[ "$BUILD_DIR" != "$ROOT_DIR/build" && "$BUILD_DIR" != "$ROOT_DIR/local/"*"/
 fi
 APP="$BUILD_DIR/MacTools.app"
 APPEX="$APP/Contents/PlugIns/MacToolsFinderExtension.appex"
-SDK_PATH="$(xcrun --sdk macosx --show-sdk-path)"
+SDK_PATH="${MACTOOLS_SDK_PATH:-$(xcrun --sdk macosx --show-sdk-path)}"
 TARGET="arm64-apple-macosx26.0"
 SPARKLE_DIR="$(bash "$ROOT_DIR/scripts/setup-sparkle.sh")"
 SIGNING_IDENTITY="${MACTOOLS_SIGNING_IDENTITY:--}"
@@ -60,6 +60,7 @@ swiftc \
   "$ROOT_DIR/Sources/App/AppMenu.swift" \
   "$ROOT_DIR/Sources/App/NewFileFeature.swift" \
   "$ROOT_DIR/Sources/App/SettingsFeature.swift" \
+  "$ROOT_DIR/Sources/App/FinderExtensionStatus.swift" \
   "$ROOT_DIR/Sources/App/StandaloneMenuContext.swift" \
   "$ROOT_DIR/Sources/App/FinderAccessibilityContext.swift" \
   "$ROOT_DIR/Sources/App/StandaloneMenuController.swift" \

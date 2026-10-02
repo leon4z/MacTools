@@ -251,6 +251,8 @@ private struct StatusCard: View {
 private struct HyperSettingsPage: View {
     @ObservedObject var model: MacToolsModel
     @ObservedObject var runtime: InputRuntime
+    @State private var customHyperTap = false
+    @State private var customMehTap = false
     private func binding<T>(_ key: WritableKeyPath<HyperPreferences, T>) -> Binding<T> {
         Binding(get: { model.configuration.hyper[keyPath: key] }, set: { value in model.update { $0.hyper[keyPath: key] = value } })
     }
@@ -258,8 +260,8 @@ private struct HyperSettingsPage: View {
         ScrollView {
             VStack(spacing: 20) {
                 StatusCard(enabled: model.configuration.hyperActive, status: runtime.hyperStatus)
-                mappingCard("Hyper", key: \.hyper, symbols: model.configuration.hyper.includeShift ? "⌃ ⌥ ⌘ ⇧" : "⌃ ⌥ ⌘")
-                mappingCard("Meh", key: \.meh, symbols: "⌃ ⌥ ⇧")
+                mappingCard("Hyper", key: \.hyper, symbols: model.configuration.hyper.includeShift ? "⌃ ⌥ ⌘ ⇧" : "⌃ ⌥ ⌘", customTap: $customHyperTap)
+                mappingCard("Meh", key: \.meh, symbols: "⌃ ⌥ ⇧", customTap: $customMehTap)
                 GroupBox("同时作用于鼠标") {
                     HStack(spacing: 22) {
                         Toggle("点击", isOn: binding(\.clicks)); Toggle("拖动", isOn: binding(\.drags))
@@ -271,8 +273,19 @@ private struct HyperSettingsPage: View {
             }.padding(26)
         }.onDisappear { model.recording = false }
     }
-    private func mappingCard(_ title: String, key: WritableKeyPath<HyperPreferences, ModifierMapping>, symbols: String) -> some View {
+    private func mappingCard(_ title: String, key: WritableKeyPath<HyperPreferences, ModifierMapping>, symbols: String, customTap: Binding<Bool>) -> some View {
         let mapping = Binding<ModifierMapping>(get: { model.configuration.hyper[keyPath: key] }, set: { value in model.update { $0.hyper[keyPath: key] = value } })
+        let tapSelection = Binding<Int>(get: {
+            customTap.wrappedValue ? -1 : ShortcutPreset.selection(for: mapping.wrappedValue.tap)
+        }, set: { id in
+            model.recording = false
+            if id == -1 {
+                customTap.wrappedValue = true
+            } else if let preset = ShortcutPreset.all.first(where: { $0.id == id }) {
+                customTap.wrappedValue = false
+                mapping.wrappedValue.tap = preset.shortcut
+            }
+        })
         return GroupBox(title + "   " + symbols) {
             VStack(alignment: .leading, spacing: 18) {
                 HStack {
@@ -284,20 +297,24 @@ private struct HyperSettingsPage: View {
                 }
                 if title == "Hyper" { Toggle("包含 Shift", isOn: binding(\.includeShift)) }
                 HStack {
-                    Picker("单击映射", selection: Binding(get: { ShortcutPreset.selection(for: mapping.wrappedValue.tap) }, set: { id in
-                        if let preset = ShortcutPreset.all.first(where: { $0.id == id }) { model.recording = false; mapping.wrappedValue.tap = preset.shortcut }
-                    })) {
-                        Text("自定义组合键").tag(-1)
+                    Picker("单击时", selection: tapSelection) {
+                        Text("自定义快捷键").tag(-1)
                         ForEach(ShortcutPreset.all) { Text($0.title).tag($0.id) }
                     }.frame(width: 260)
                     Spacer()
                 }
-                HStack {
-                    Text("组合键录制").frame(width: 86, alignment: .leading)
-                    ShortcutRecorder(shortcut: mapping.tap, recording: $model.recording).frame(height: 30)
-                    Button("清除") { mapping.wrappedValue.tap = TapShortcut() }
+                if tapSelection.wrappedValue == -1 {
+                    HStack {
+                        Text("录制单击输出").frame(width: 100, alignment: .leading)
+                        ShortcutRecorder(shortcut: mapping.tap, recording: $model.recording).frame(height: 30)
+                        Button("清除") {
+                            model.recording = false
+                            customTap.wrappedValue = false
+                            mapping.wrappedValue.tap = TapShortcut()
+                        }
+                    }
                 }
-                Text("选 Caps Lock 可在单击时切换系统大写锁定；按住并组合其他键时仅作为 Hyper／Meh。其他辅助键单击后会立即松开。")
+                Text("按住 \(mapping.wrappedValue.trigger.title)，再按其他键，即可使用 \(title)（\(symbols.replacingOccurrences(of: " ", with: ""))）；使用组合后，松开不会执行单击动作。")
                     .font(.caption).foregroundStyle(.secondary)
             }
         }

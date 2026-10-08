@@ -444,7 +444,10 @@ final class InputRuntime: ObservableObject {
         guard hyperRunning else { return }
         if shortcut.keyCode == 57 {
             do { try NativeCapsLock.toggle() }
-            catch { hyperStatus = "大写锁定切换失败：" + error.localizedDescription }
+            catch {
+                hyperStatus = "大写锁定切换失败：" + error.localizedDescription
+                Logger(subsystem: "com.leon4z.MacTools", category: "InputRuntime").error("Caps Lock toggle failed: \(error.localizedDescription, privacy: .public)")
+            }
             return
         }
         let baseline = state.outputFlags(raw: CGEventSource.flagsState(.hidSystemState), mappings: mappings, apply: true)

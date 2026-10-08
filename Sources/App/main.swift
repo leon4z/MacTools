@@ -6,7 +6,9 @@ import Foundation
 @MainActor
 final class AppDelegate: NSObject, NSApplicationDelegate {
     private var settingsWindowController: SettingsWindowController?
+    private var menuBarController: MenuBarController?
     private var actionLaunchObserved = false
+    private var launchedAsLoginItem = false
     private var terminationSignal: DispatchSourceSignal?
     private var handledMoveRequestIDs: Set<String> = []
     private let logURL = URL(fileURLWithPath: "\(NSHomeDirectory())/Library/Logs/MacTools.log")
@@ -36,9 +38,11 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
     }
 
     private lazy var macTools: MacToolsModel = MacToolsModel(standalone: standaloneMenu)
+    private lazy var applicationSettings = ApplicationSettingsModel()
 
     func applicationWillFinishLaunching(_ notification: Notification) {
         SharedConfigurationAccess.restore()
+        NSApp.disableRelaunchOnLogin()
         AppMenu.install(in: NSApp)
         signal(SIGTERM, SIG_IGN)
         let signalSource = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
@@ -52,10 +56,16 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             forEventClass: AEEventClass(kInternetEventClass),
             andEventID: AEEventID(kAEGetURL)
         )
+        NSAppleEventManager.shared().setEventHandler(
+            self,
+            andSelector: #selector(handleOpenApplicationEvent(_:withReplyEvent:)),
+            forEventClass: AEEventClass(kCoreEventClass),
+            andEventID: AEEventID(kAEOpenApplication)
+        )
     }
 
     func applicationDidFinishLaunching(_ notification: Notification) {
-        NSApp.setActivationPolicy(.regular)
+        applicationSettings.applyStoredPresentation()
         macTools.refresh()
         macTools.updates.isBusy = { [weak self] in self?.moveController.isRunning ?? false }
         macTools.updates.prepareToInstall = { [weak self] in self?.macTools.suspendForUpdate() }
@@ -68,19 +78,31 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
             menu.insertItem(.separator(), at: 1)
         }
 
+        menuBarController = MenuBarController(model: macTools) { [weak self] in
+            self?.showMainWindow()
+        }
+
         guard !actionLaunchObserved else { return }
         if MacToolsConfigurationStore.finderActive, let pendingMove = MoveRequestStore.consumeOldestFreshRequestFromHost() {
             prepareForActionInvocation()
             handleMovePayload(pendingMove)
-        } else {
+        } else if InitialWindowPolicy.shouldShowWindow(
+            launchedAsLoginItem: launchedAsLoginItem,
+            actionLaunchObserved: actionLaunchObserved
+        ) {
             showMainWindow()
         }
+    }
+
+    func applicationDidBecomeActive(_ notification: Notification) {
+        applicationSettings.refreshLoginItemState()
     }
 
     private func showMainWindow() {
         if settingsWindowController == nil {
             settingsWindowController = SettingsWindowController(
                 macTools: macTools,
+                applicationSettings: applicationSettings,
                 standaloneMenu: standaloneMenu,
                 openExtensionSettings: {
                     FIFinderSyncController.showExtensionManagementInterface()
@@ -134,6 +156,13 @@ final class AppDelegate: NSObject, NSApplicationDelegate {
         }
 
         handleURL(url)
+    }
+
+    @objc private func handleOpenApplicationEvent(
+        _ event: NSAppleEventDescriptor,
+        withReplyEvent replyEvent: NSAppleEventDescriptor
+    ) {
+        launchedAsLoginItem = event.paramDescriptor(forKeyword: keyAELaunchedAsLogInItem) != nil
     }
 
     private func handleURL(_ url: URL) {

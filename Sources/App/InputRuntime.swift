@@ -1,6 +1,7 @@
 import AppKit
 import ApplicationServices
 import Combine
+import Carbon
 import IOKit
 import os
 
@@ -26,32 +27,38 @@ final class InputRuntime: ObservableObject {
     private var keyboardDeviceIDs = Set<String>()
     private var keyboardWanted = false
     private var keyboardBlocked = false
+    private var secureInputPaused = false
     private var pointerBlocked = false
-    private var keyboardRetryCount = 0
+    private var keyboardFailureCount = 0
     private var nextKeyboardRetry: TimeInterval?
     private let retryDelays: [TimeInterval] = [2, 4, 8, 16, 30]
     private let now: () -> TimeInterval
     private let inputIdle: () -> Bool
+    private let secureInputEnabled: () -> Bool
     private let keyIsDown: (CGKeyCode) -> Bool
     private let postEvent: (CGEvent, CGEventTapLocation) -> Void
     private var pointerRecoveryError: String?
     private var keyboardRecoveryError: String?
     private var pointerRunning = false
     private var generation = 0
+    private var listenerGeneration = 0
+    private var keyboardStableSince: TimeInterval?
     private static let marker: Int64 = 0x4D6163546F6F6C73
 
     init(caps: (any CapsLockLeasing)? = nil,
          pointer: (any HIDSettingsLeasing)? = nil,
          keyboardListener: (any KeyboardEventListening)? = nil,
          now: @escaping () -> TimeInterval = { ProcessInfo.processInfo.systemUptime },
-         inputIdle: @escaping () -> Bool = { (0..<128).allSatisfy { !CGEventSource.keyState(.hidSystemState, key: CGKeyCode($0)) } },
+         inputIdle: (() -> Bool)? = nil,
+         secureInputEnabled: @escaping () -> Bool = { IsSecureEventInputEnabled() },
          keyIsDown: @escaping (CGKeyCode) -> Bool = { CGEventSource.keyState(.hidSystemState, key: $0) },
          postEvent: @escaping (CGEvent, CGEventTapLocation) -> Void = { $0.post(tap: $1) },
          permission: @escaping () -> Bool = { AXIsProcessTrusted() },
          runningApps: @escaping () -> Set<String> = { Set(NSWorkspace.shared.runningApplications.compactMap { $0.localizedName?.lowercased() }) }) {
         self.caps = caps ?? CapsLockLease(); self.pointer = pointer ?? HIDSettingsLease(name: "pointer"); self.keyboardListener = keyboardListener ?? KeyboardEventListener()
         self.keyIsDown = keyIsDown; self.postEvent = postEvent
-        self.permission = permission; self.runningApps = runningApps; self.now = now; self.inputIdle = inputIdle
+        self.secureInputEnabled = secureInputEnabled
+        self.permission = permission; self.runningApps = runningApps; self.now = now; self.inputIdle = inputIdle ?? { KeyboardRecoveryInput.isIdle(keyIsDown: keyIsDown) }
     }
 
     func markMappedCombinationUsed() { state.markUsed() }
@@ -141,6 +148,12 @@ final class InputRuntime: ObservableObject {
     private var mappings: [ModifierMapping] { [configuration.hyper.hyper, configuration.hyper.meh] }
     private func attemptKeyboardStart() {
         guard keyboardWanted, !keyboardBlocked else { return }
+        guard !secureInputEnabled() else { waitForSecureInput(); return }
+        guard keyboardFailureCount <= retryDelays.count else {
+            nextKeyboardRetry = nil
+            hyperStatus = "键盘映射已暂停，请重新检查。"
+            return
+        }
         guard inputIdle(), state.pressed.isEmpty else {
             nextKeyboardRetry = now() + 2
             hyperStatus = "等待松开按键后恢复映射。"
@@ -155,20 +168,23 @@ final class InputRuntime: ObservableObject {
         caps.lease.refreshServices()
         do {
             try caps.lease.recover(); keyboardRecoveryError = nil
+            listenerGeneration += 1
             guard keyboardListener.start({ [weak self] type, event in
                 guard let self else { return Unmanaged.passUnretained(event) }
                 return self.receive(type, event)
             }) else { throw HIDFailure.message("输入监听暂不可用。") }
+            guard !secureInputEnabled() else { waitForSecureInput(); return }
             if mappings.contains(where: { $0.enabled && $0.trigger == .capsLock }) { try caps.enable() }
-            hyperRunning = true; nextKeyboardRetry = nil; keyboardRetryCount = 0
+            hyperRunning = true; nextKeyboardRetry = nil; keyboardStableSince = now()
             hyperStatus = "映射已运行。单击执行映射，组合使用后松开不触发单击。"
             logKeyboardRecovery("started")
         } catch {
-            hyperRunning = false; keyboardListener.stop()
+            hyperRunning = false; listenerGeneration += 1; keyboardListener.stop()
             do { try caps.lease.restore() } catch { keyboardRecoveryError = error.localizedDescription }
             if case HIDFailure.conflict = error { keyboardBlocked = true }
-            if !keyboardBlocked && keyboardRetryCount < retryDelays.count {
-                nextKeyboardRetry = now() + retryDelays[keyboardRetryCount]
+            keyboardFailureCount += 1
+            if !keyboardBlocked && keyboardFailureCount <= retryDelays.count {
+                nextKeyboardRetry = now() + retryDelays[keyboardFailureCount - 1]
                 hyperStatus = "键盘映射暂不可用，将自动重试：" + error.localizedDescription
             } else {
                 nextKeyboardRetry = nil
@@ -179,13 +195,40 @@ final class InputRuntime: ObservableObject {
     }
     private func logKeyboardRecovery(_ event: String) {
         Logger(subsystem: "com.leon4z.MacTools", category: "InputRuntime").notice(
-            "Keyboard recovery: \(event, privacy: .public); retry=\(self.keyboardRetryCount); pending=\(self.nextKeyboardRetry != nil); status=\(self.hyperStatus, privacy: .public)")
+            "Keyboard recovery: \(event, privacy: .public); failures=\(self.keyboardFailureCount); pending=\(self.nextKeyboardRetry != nil); status=\(self.hyperStatus, privacy: .public)")
     }
     private func suspendKeyboard() {
-        generation += 1
+        generation += 1; listenerGeneration += 1; keyboardStableSince = nil
         let held = !state.pressed.isEmpty
         state.reset(); hyperRunning = false; keyboardListener.stop()
         if held { postModifierRelease() }
+    }
+
+    /// Keep the health timer and the user's intent, but release our HID mapping.
+    /// Never leave Caps mapped to F18 while no keyboard listener can consume it.
+    private func pauseKeyboardForRetry(status: String, event: String, retry: Bool = true) {
+        caps.lease.refreshServices()
+        let ownership = caps.lease.ownershipState
+        suspendKeyboard()
+        do { try caps.lease.restore(); keyboardRecoveryError = nil }
+        catch { keyboardRecoveryError = error.localizedDescription }
+        if ownership == .changed {
+            keyboardBlocked = true; secureInputPaused = false; nextKeyboardRetry = nil
+            hyperStatus = "键盘参数发生外部变化，映射已暂停；请重新检查。"
+        } else {
+            if retry && keyboardFailureCount <= retryDelays.count {
+                nextKeyboardRetry = now() + retryDelays[max(0, keyboardFailureCount - 1)]
+            } else { nextKeyboardRetry = nil }
+            hyperStatus = retry && nextKeyboardRetry == nil ? "键盘映射多次恢复失败，已暂停；请重新检查。" : status
+            if let keyboardRecoveryError { hyperStatus += " 原生按键恢复待重试：" + keyboardRecoveryError }
+        }
+        logKeyboardRecovery(event)
+    }
+    private func waitForSecureInput() {
+        guard !secureInputPaused else { return }
+        secureInputPaused = true
+        pauseKeyboardForRetry(status: "系统安全输入已开启，Hyper／Meh 暂停；解除后将自动恢复。",
+                              event: "secure input enabled", retry: false)
     }
 
     private func applyPointer() throws {
@@ -223,8 +266,8 @@ final class InputRuntime: ObservableObject {
         healthTimer?.invalidate(); healthTimer = nil
         mouseScroll.stop()
         suspendKeyboard()
-        keyboardWanted = false; keyboardBlocked = false; pointerBlocked = false
-        keyboardRetryCount = 0; nextKeyboardRetry = nil
+        keyboardWanted = false; keyboardBlocked = false; secureInputPaused = false; pointerBlocked = false
+        keyboardFailureCount = 0; nextKeyboardRetry = nil
         mouseRunning = false; pointerRunning = false
         caps.lease.refreshServices(); pointer.refreshServices()
         do { try caps.lease.restore(); keyboardRecoveryError = nil }
@@ -237,34 +280,8 @@ final class InputRuntime: ObservableObject {
         guard permission() else {
             stop(); mouseStatus = "辅助功能权限发生变化，已暂停；请重新检查。"; hyperStatus = mouseStatus; return
         }
-        if hyperRunning { _ = reconcileReleasedTriggers() }
-        caps.lease.refreshServices(); pointer.refreshServices()
-        let keyboardIDs = caps.lease.keyboardServiceIDs
-        if keyboardIDs != keyboardDeviceIDs {
-            keyboardDeviceIDs = keyboardIDs
-            if keyboardWanted && !keyboardBlocked {
-                suspendKeyboard()
-                keyboardRetryCount = 0; nextKeyboardRetry = now() + 2
-                hyperStatus = "键盘设备发生变化，等待设备就绪后自动恢复。"
-                logKeyboardRecovery("devices changed")
-            }
-        } else if hyperRunning {
-            switch caps.lease.ownershipState {
-            case .intact: break
-            case .unavailable:
-                suspendKeyboard(); nextKeyboardRetry = now() + 2
-                hyperStatus = "键盘参数暂不可读取，等待设备就绪后自动恢复。"
-                logKeyboardRecovery("properties unavailable")
-            case .changed:
-                suspendKeyboard(); keyboardBlocked = true; nextKeyboardRetry = nil
-                do { try caps.lease.restore() } catch { keyboardRecoveryError = error.localizedDescription }
-                hyperStatus = "键盘参数发生外部变化，映射已暂停；请重新检查。"
-            }
-        }
-        if let deadline = nextKeyboardRetry, now() >= deadline, inputIdle(), state.pressed.isEmpty {
-            keyboardRetryCount += 1
-            attemptKeyboardStart()
-        }
+        checkKeyboardHealth()
+        pointer.refreshServices()
         let ids = pointer.mouseServiceIDs
         if ids != deviceIDs {
             deviceIDs = ids
@@ -289,11 +306,68 @@ final class InputRuntime: ObservableObject {
                 + "指针参数发生外部变化，指针调整已暂停；请重新检查。"
         }
     }
+    private func checkKeyboardHealth() {
+        guard keyboardWanted, !keyboardBlocked else { return }
+        if secureInputEnabled() {
+            waitForSecureInput()
+            // Restoration can temporarily fail while a device reconnects.
+            if keyboardRecoveryError != nil {
+                caps.lease.refreshServices()
+                do { try caps.lease.restore(); keyboardRecoveryError = nil }
+                catch { keyboardRecoveryError = error.localizedDescription }
+            }
+            return
+        }
+        if secureInputPaused {
+            secureInputPaused = false
+            nextKeyboardRetry = keyboardFailureCount <= retryDelays.count ? now() : nil
+            hyperStatus = nextKeyboardRetry != nil ? "安全输入已解除，等待松开按键后恢复映射。" : "安全输入已解除；键盘映射多次恢复失败，请重新检查。"
+            logKeyboardRecovery("secure input disabled")
+        }
+        if hyperRunning {
+            _ = reconcileReleasedTriggers()
+            // A successful start alone is not proof of a healthy event tap.
+            // Only stable operation renews the temporary-failure retry budget.
+            if let since = keyboardStableSince, now() - since >= 30 {
+                keyboardFailureCount = 0; keyboardStableSince = nil
+            }
+        }
+        caps.lease.refreshServices()
+        let keyboardIDs = caps.lease.keyboardServiceIDs
+        if keyboardIDs != keyboardDeviceIDs {
+            keyboardDeviceIDs = keyboardIDs
+            if keyboardWanted && !keyboardBlocked {
+                keyboardFailureCount = 0
+                pauseKeyboardForRetry(status: "键盘设备发生变化，等待设备就绪后自动恢复。", event: "devices changed")
+            }
+        } else if hyperRunning {
+            switch caps.lease.ownershipState {
+            case .intact: break
+            case .unavailable:
+                pauseKeyboardForRetry(status: "键盘参数暂不可读取，等待设备就绪后自动恢复。", event: "properties unavailable")
+            case .changed:
+                suspendKeyboard(); keyboardBlocked = true; nextKeyboardRetry = nil
+                do { try caps.lease.restore() } catch { keyboardRecoveryError = error.localizedDescription }
+                hyperStatus = "键盘参数发生外部变化，映射已暂停；请重新检查。"
+                logKeyboardRecovery("external mapping changed")
+            }
+        }
+        if let deadline = nextKeyboardRetry, now() >= deadline, inputIdle(), state.pressed.isEmpty {
+            attemptKeyboardStart()
+        }
+    }
     private func receive(_ type: CGEventType, _ event: CGEvent) -> Unmanaged<CGEvent>? {
         if type == .tapDisabledByTimeout || type == .tapDisabledByUserInput {
-            // Do not auto-reenable a broken mapping while keys are held.
+            // The callback may outlive a manual stop or a newer listener.
+            let token = listenerGeneration
             DispatchQueue.main.async { [weak self] in
-                self?.stop(); self?.hyperStatus = "输入监听被系统暂停，请重新检查。"; self?.mouseStatus = "输入监听被系统暂停，请重新检查。"
+                guard let self, token == self.listenerGeneration, self.keyboardWanted, !self.keyboardBlocked else { return }
+                guard self.permission() else { self.stop(); self.hyperStatus = "辅助功能权限发生变化，已暂停；请重新检查。"; self.mouseStatus = self.hyperStatus; return }
+                if self.secureInputEnabled() { self.waitForSecureInput() }
+                else {
+                    self.keyboardFailureCount += 1
+                    self.pauseKeyboardForRetry(status: "输入监听暂时中断，等待松开按键后自动恢复。", event: "event tap disabled")
+                }
             }
             return Unmanaged.passUnretained(event)
         }
@@ -311,13 +385,13 @@ final class InputRuntime: ObservableObject {
             }
             if [.keyDown, .keyUp, .flagsChanged].contains(type), let mapping = mappings.first(where: { $0.enabled && $0.trigger.keyCode == code }) {
                 let down = mapping.trigger == .capsLock ? type == .keyDown : event.flags.rawValue & mapping.trigger.deviceMask != 0
-                if down {
+                if down && !(mapping.trigger == .capsLock && state.pressed[code] == nil && event.getIntegerValueField(.keyboardEventAutorepeat) != 0) {
                     let isHyper = mapping.trigger == configuration.hyper.hyper.trigger && configuration.hyper.hyper.enabled
                     var flags: CGEventFlags = [.maskControl, .maskAlternate]
                     if isHyper { flags.insert(.maskCommand); if configuration.hyper.includeShift { flags.insert(.maskShift) } }
                     else { flags.insert(.maskShift) }
                     state.down(mapping: mapping, flags: flags)
-                } else {
+                } else if !down {
                     let shortcut = state.up(code: code)
                     if let shortcut {
                         let token = generation

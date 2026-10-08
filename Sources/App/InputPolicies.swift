@@ -97,3 +97,11 @@ struct HyperState {
         return result
     }
 }
+
+/// Caps Lock's keyState is its persistent lock state, not a held-key signal.
+/// F18 (the mapped Caps trigger) and every other physical key still gate recovery.
+enum KeyboardRecoveryInput {
+    static func isIdle(keyIsDown: (CGKeyCode) -> Bool) -> Bool {
+        (0..<128).allSatisfy { $0 == 57 || !keyIsDown(CGKeyCode($0)) }
+    }
+}

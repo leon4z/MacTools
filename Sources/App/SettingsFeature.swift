@@ -8,10 +8,13 @@ final class SettingsWindowController {
     private let model = ToolSettingsModel()
     private let window: NSWindow
 
-    init(macTools: MacToolsModel, standaloneMenu: StandaloneMenuController, openExtensionSettings: @escaping () -> Void, restartFinder: @escaping () -> Void) {
+    init(macTools: MacToolsModel, applicationSettings: ApplicationSettingsModel,
+         standaloneMenu: StandaloneMenuController, openExtensionSettings: @escaping () -> Void,
+         restartFinder: @escaping () -> Void) {
         let rootView = MacToolsRootView(
             model: model,
             macTools: macTools,
+            applicationSettings: applicationSettings,
             standaloneMenu: standaloneMenu,
             openExtensionSettings: openExtensionSettings,
             restartFinder: restartFinder

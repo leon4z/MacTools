@@ -8,6 +8,10 @@ import CoreGraphics
         if !value { throw NSError(domain: "InputPolicyTests", code: count, userInfo: [NSLocalizedDescriptionKey: description]) }
     }
     static func main() throws {
+        try check(KeyboardRecoveryInput.isIdle(keyIsDown: { $0 == 57 }), "Caps lock state alone must not block recovery")
+        try check(!KeyboardRecoveryInput.isIdle(keyIsDown: { $0 == 79 }), "mapped Caps/F18 held must defer recovery")
+        try check(!KeyboardRecoveryInput.isIdle(keyIsDown: { $0 == 57 || $0 == 0 }), "ordinary held key still defers recovery with Caps lock on")
+        try check(!KeyboardRecoveryInput.isIdle(keyIsDown: { $0 == 59 }), "held physical modifier still defers recovery")
         var scroll = ScrollSmoother()
         scroll.add(x: 75, y: -240)
         var totalX = 0.0, totalY = 0.0

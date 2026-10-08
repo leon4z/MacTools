@@ -35,9 +35,10 @@ import IOKit
     var lease: any HIDSettingsLeasing { fixture }
     var failures = 0
     var attempts = 0
+    var onEnable: (() -> Void)?
     init(_ lease: RecoveryLease) { fixture = lease }
     func enable() throws {
-        attempts += 1
+        attempts += 1; onEnable?()
         if failures > 0 { failures -= 1; throw HIDFailure.message("device temporarily unavailable") }
         guard !fixture.cached.isEmpty else { throw HIDFailure.message("no keyboard") }
         for id in fixture.cached {
@@ -66,9 +67,10 @@ import IOKit
         var time = 0.0
         var idle = true
         var trusted = true
+        var secure = false
         var heldKeys = Set<CGKeyCode>()
         var posted: [CGEvent] = []
-        let runtime = InputRuntime(caps: caps, pointer: pointer, keyboardListener: listener, now: { time }, inputIdle: { idle }, keyIsDown: { heldKeys.contains($0) }, postEvent: { event, _ in posted.append(event) }, permission: { trusted }, runningApps: { [] })
+        let runtime = InputRuntime(caps: caps, pointer: pointer, keyboardListener: listener, now: { time }, inputIdle: { idle }, secureInputEnabled: { secure }, keyIsDown: { heldKeys.contains($0) }, postEvent: { event, _ in posted.append(event) }, permission: { trusted }, runningApps: { [] })
         defer { runtime.stop() }
         var config = MacToolsConfiguration(); config.hyperEnabled = true
         config.hyper.meh.enabled = true; config.hyper.meh.trigger = .capsLock
@@ -212,10 +214,169 @@ import IOKit
         for _ in 0..<40 { time += 2; runtime.checkHealth() }
         precondition(caps.attempts == permissionAttempts && !listener.active, "permission revocation stops retry until explicit recheck")
         runtime.apply(config)
+        // Secure input protects ordinary typing: restore the native Caps mapping,
+        // preserve the mouse module and resume without a manual refresh.
+        config.mouseEnabled = true; config.mouse.scrolling = false; config.mouse.pointer = false
+        runtime.apply(config)
+        let mouseBeforeSecure = runtime.mouseStatus
+        triggerDown()
+        let releasesBeforeSecure = posted.count
+        secure = true; time += 2; runtime.checkHealth()
+        precondition(!listener.active, "secure input must pause the keyboard listener")
+        precondition(runtime.hyperStatus.contains("安全输入"))
+        precondition(runtime.mouseStatus == mouseBeforeSecure, "keyboard pause must not stop the mouse module")
+        precondition(keyboard.values["new"]?.isEmpty == true, "native Caps mapping must be restored during secure input")
+        precondition(posted.count == releasesBeforeSecure + 1, "secure pause releases synthetic modifiers")
+        heldKeys.remove(trigger)
+        let startsDuringSecure = listener.starts, attemptsDuringSecure = caps.attempts
+        let pointerRefreshes = pointer.refreshes
+        for _ in 0..<100 { time += 2; runtime.checkHealth() }
+        precondition(listener.starts == startsDuringSecure && caps.attempts == attemptsDuringSecure, "secure wait must not consume retries")
+        precondition(pointer.refreshes > pointerRefreshes, "health checks remain active while the keyboard is paused")
+        secure = false; idle = false; time += 2; runtime.checkHealth()
+        precondition(!listener.active, "secure exit cannot resume while other keys are held")
+        idle = true; time += 2; runtime.checkHealth()
+        precondition(listener.active && runtime.hyperStatus.hasPrefix("映射已运行"), "secure exit resumes without manual refresh")
+        func triggerUp() {
+            let event = CGEvent(keyboardEventSource: nil, virtualKey: trigger, keyDown: false)!
+            event.flags = []; _ = listener.send(event)
+        }
+        let beforeUnmatchedUp = posted.count
+        triggerUp()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(posted.count == beforeUnmatchedUp, "release crossing recovery cannot generate a tap")
+        // A disabled event tap is temporary, and must not cancel the health timer.
+        let disabledTap = CGEvent(source: nil)!; disabledTap.type = .tapDisabledByTimeout
+        _ = listener.send(disabledTap)
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(!listener.active && runtime.mouseStatus == mouseBeforeSecure)
+        for _ in 0..<8 { time += 2; runtime.checkHealth() }
+        precondition(listener.active, "event tap timeout resumes automatically")
+        // Stale disabled-tap callbacks cannot suspend a newer listener.
+        _ = listener.send(disabledTap)
+        runtime.apply(config)
+        let newStarts = listener.starts
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(listener.active && listener.starts == newStarts, "stale callback must not stop a newer generation")
+        // Lost key-up cleanup must not cancel an already queued tap recovery.
+        runtime.apply(config); triggerDown(); heldKeys.remove(trigger)
+        let disabledBeforeReconcile = CGEvent(source: nil)!; disabledBeforeReconcile.type = .tapDisabledByTimeout
+        _ = listener.send(disabledBeforeReconcile)
+        time += 2; runtime.checkHealth() // reconciles release before the async pause
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(!listener.active, "trigger cleanup must not invalidate listener recovery")
+        time += 2; runtime.checkHealth()
+        precondition(listener.active)
+        // An immediately re-disabled tap must eventually exhaust automatic retry.
+        runtime.apply(config)
+        let repeatedDisableStarts = listener.starts
+        for index in 0..<6 {
+            let failure = CGEvent(source: nil)!; failure.type = .tapDisabledByTimeout
+            _ = listener.send(failure)
+            RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+            precondition(!listener.active)
+            time += 31; runtime.checkHealth()
+            precondition(listener.active == (index < 5))
+        }
+        precondition(listener.starts - repeatedDisableStarts == 5 && runtime.hyperStatus.contains("请重新检查"), "repeated disabled taps have five retries")
+        // Secure on/off freezes an existing failure budget instead of renewing it.
+        runtime.apply(config); runtime.stop(); caps.failures = 100
+        let startsBeforeFrozenBudget = caps.attempts
+        runtime.apply(config)
+        for _ in 0..<10 {
+            secure = true; time += 2; runtime.checkHealth()
+            secure = false; time += 2; runtime.checkHealth()
+        }
+        precondition(caps.attempts - startsBeforeFrozenBudget == 6, "secure transitions cannot reset real startup failure budget")
+        caps.failures = 0; runtime.apply(config)
+        // A tap created during a failed Caps setup is already stopped by catch;
+        // its queued disabled callback must not count the same failure twice.
+        runtime.stop(); caps.failures = 1
+        caps.onEnable = {
+            let stoppedFailure = CGEvent(source: nil)!; stoppedFailure.type = .tapDisabledByTimeout
+            _ = listener.send(stoppedFailure)
+        }
+        runtime.apply(config)
+        let failedSetupStatus = runtime.hyperStatus
+        caps.onEnable = nil
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(!listener.active && runtime.hyperStatus == failedSetupStatus, "callback from failed Caps setup must be stale")
+        time += 2; runtime.checkHealth()
+        precondition(listener.active)
+        // Permission failure inside a queued callback pauses both modules clearly.
+        let permissionFailure = CGEvent(source: nil)!; permissionFailure.type = .tapDisabledByTimeout
+        _ = listener.send(permissionFailure); trusted = false
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(!listener.active && runtime.mouseStatus.contains("辅助功能权限"))
+        trusted = true
+        time += 31; runtime.checkHealth()
+        precondition(!listener.active, "permission return alone cannot revive an explicitly blocked runtime")
+        runtime.apply(config)
+        // External ownership remains a manual block even across secure on/off.
+        keyboard.values["new"] = external
+        secure = true; time += 2; runtime.checkHealth()
+        let secureConflictStarts = listener.starts
+        secure = false
+        for _ in 0..<8 { time += 2; runtime.checkHealth() }
+        precondition(listener.starts == secureConflictStarts && !listener.active)
+        precondition(PropertyLeaseJournal.equal(keyboard.values["new"]!, external))
+        keyboard.values["new"] = []; runtime.apply(config)
+        // Startup during secure input neither starts a tap nor remaps Caps.
+        runtime.stop(); secure = true
+        let beforeSecureStartup = caps.attempts
+        runtime.apply(config)
+        precondition(!listener.active && caps.attempts == beforeSecureStartup && keyboard.values["new"]?.isEmpty == true)
+        secure = false; time += 2; runtime.checkHealth()
+        precondition(listener.active)
+        // A held Caps crossing recovery may first produce auto-repeat/key-up.
+        // Neither may create a new press or replay its single-tap action.
+        runtime.apply(tapConfig)
+        triggerDown(); secure = true; time += 2; runtime.checkHealth()
+        heldKeys.remove(trigger); heldKeys.insert(57)
+        secure = false; time += 2; runtime.checkHealth()
+        precondition(listener.active)
+        let repeated = CGEvent(keyboardEventSource: nil, virtualKey: trigger, keyDown: true)!
+        repeated.setIntegerValueField(.keyboardEventAutorepeat, value: 1)
+        repeated.flags = []
+        let repeatOutput = listener.send(repeated)!
+        precondition(repeatOutput.flags.intersection([.maskControl, .maskAlternate, .maskShift]).isEmpty)
+        let beforeCrossedRelease = posted.count
+        triggerUp()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(posted.count == beforeCrossedRelease, "held Caps crossing recovery cannot produce a tap")
+        heldKeys.remove(57)
+        triggerDown(); heldKeys.remove(trigger)
+        triggerUp()
+        RunLoop.main.run(until: Date().addingTimeInterval(0.01))
+        precondition(posted.count == beforeCrossedRelease + 2, "fresh Caps press/release still emits one tap")
+        runtime.apply(config)
+        // Explicit stop and disable still take precedence over a secure-input wait.
+        secure = true; time += 2; runtime.checkHealth()
+        runtime.stop(); let stoppedSecureStarts = listener.starts
+        secure = false
+        for _ in 0..<8 { time += 2; runtime.checkHealth() }
+        precondition(listener.starts == stoppedSecureStarts)
+        runtime.apply(config)
+        secure = true; time += 2; runtime.checkHealth()
         config.allEnabled = false; runtime.apply(config)
+        secure = false
         let disabledAttempts = caps.attempts
         for _ in 0..<40 { time += 2; runtime.checkHealth() }
         precondition(caps.attempts == disabledAttempts && !listener.active, "user disable wins over recovery")
-        print("InputRecoveryTests: wake failure, stale/empty/new devices, unreadable property, listener failure, held keys, external ownership, retry bounds and stop/permission/disable checks passed; no real HID or global input")
+        // Exercise the production default idle policy through the runtime seam.
+        let policyKeyboard = RecoveryLease(dir.appendingPathComponent("policy-keyboard.plist"))
+        let policyListener = RecoveryListener(), policyCaps = RecoveryCaps(policyKeyboard)
+        var policyKeys = Set<CGKeyCode>([57])
+        let policyRuntime = InputRuntime(caps: policyCaps, pointer: RecoveryLease(dir.appendingPathComponent("policy-pointer.plist")),
+            keyboardListener: policyListener, now: { time }, secureInputEnabled: { false },
+            keyIsDown: { policyKeys.contains($0) }, postEvent: { _, _ in }, permission: { true }, runningApps: { [] })
+        policyRuntime.apply(tapConfig)
+        precondition(policyListener.active, "persistent Caps lock must not prevent production idle policy from starting")
+        policyRuntime.stop(); policyKeys.insert(79); policyRuntime.apply(tapConfig)
+        precondition(!policyListener.active, "physically held F18 still defers startup")
+        policyKeys.remove(79); time += 2; policyRuntime.checkHealth()
+        precondition(policyListener.active)
+        policyRuntime.stop()
+        print("InputRecoveryTests: wake/device recovery, secure input entry/exit/startup, native Caps restoration, Caps lock idle policy, crossed releases, tap timeout/stale callbacks, mouse isolation, external ownership, retry bounds and stop/permission/disable checks passed; no real HID or global input")
     }
 }

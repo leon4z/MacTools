@@ -12,6 +12,7 @@ private enum MacToolsPage: String, CaseIterable, Identifiable {
 struct MacToolsRootView: View {
     @ObservedObject var model: ToolSettingsModel
     @ObservedObject var macTools: MacToolsModel
+    @ObservedObject var applicationSettings: ApplicationSettingsModel
     @ObservedObject var standaloneMenu: StandaloneMenuController
     let openExtensionSettings: () -> Void
     let restartFinder: () -> Void
@@ -60,7 +61,7 @@ struct MacToolsRootView: View {
             Divider()
             VStack(spacing: 0) {
                 if settings {
-                    AppSettingsPage(model: macTools)
+                    AppSettingsPage(model: macTools, applicationSettings: applicationSettings)
                 } else {
                     HStack {
                         Text(page.rawValue).font(.system(size: 22, weight: .semibold))
@@ -99,9 +100,14 @@ struct MacToolsRootView: View {
         .onChange(of: macTools.configurationLoaded) { _, loaded in
             if loaded { model.reload() }
         }
-        .alert("设置未保存", isPresented: Binding(get: { macTools.errorMessage != nil || model.errorMessage != nil }, set: { if !$0 { macTools.errorMessage = nil; model.errorMessage = nil } })) {
-            Button("好") { macTools.errorMessage = nil; model.errorMessage = nil }
-        } message: { Text(macTools.errorMessage ?? model.errorMessage ?? "未知错误") }
+        .alert("设置未保存", isPresented: Binding(
+            get: { macTools.errorMessage != nil || model.errorMessage != nil || applicationSettings.errorMessage != nil },
+            set: { if !$0 { macTools.errorMessage = nil; model.errorMessage = nil; applicationSettings.errorMessage = nil } }
+        )) {
+            Button("好") { macTools.errorMessage = nil; model.errorMessage = nil; applicationSettings.errorMessage = nil }
+        } message: {
+            Text(macTools.errorMessage ?? model.errorMessage ?? applicationSettings.errorMessage ?? "未知错误")
+        }
     }
 }
 
@@ -323,11 +329,32 @@ private struct HyperSettingsPage: View {
 
 private struct AppSettingsPage: View {
     @ObservedObject var model: MacToolsModel
+    @ObservedObject var applicationSettings: ApplicationSettingsModel
     var body: some View {
         ScrollView {
             VStack(alignment: .leading, spacing: 22) {
                 Text("应用设置").font(.system(size: 24, weight: .semibold))
                 ConfigurationAccessCard(model: model, shortcuts: model.appShortcuts)
+                GroupBox("启动与显示") {
+                    VStack(alignment: .leading, spacing: 14) {
+                        Toggle("登录时启动", isOn: Binding(
+                            get: { applicationSettings.launchAtLogin },
+                            set: { applicationSettings.setLaunchAtLogin($0) }
+                        ))
+                        Text(applicationSettings.loginItemStatusText)
+                            .font(.caption).foregroundStyle(.secondary)
+                        if applicationSettings.requiresLoginItemApproval {
+                            Button("打开登录项设置") { applicationSettings.openLoginItemSettings() }
+                        }
+                        Divider()
+                        Toggle("隐藏 Dock 图标", isOn: Binding(
+                            get: { applicationSettings.hideDockIcon },
+                            set: { applicationSettings.setHideDockIcon($0) }
+                        ))
+                        Text("隐藏后也不会出现在 ⌘ Tab 中；仍可从菜单栏打开设置或退出。")
+                            .font(.caption).foregroundStyle(.secondary)
+                    }.frame(maxWidth: .infinity, alignment: .leading)
+                }
                 GroupBox("增强开关") {
                     VStack(alignment: .leading, spacing: 20) {
                         Toggle("启用全部增强", isOn: bind(\.allEnabled)).toggleStyle(.switch)
@@ -350,6 +377,7 @@ private struct AppSettingsPage: View {
                 }
             }.padding(26)
         }
+        .onAppear { applicationSettings.refreshLoginItemState() }
     }
     private var versionText: String {
         let version = Bundle.main.object(forInfoDictionaryKey: "CFBundleShortVersionString") as? String ?? "—"

@@ -12,6 +12,7 @@ run_test() {
 }
 run_test AppMenuTests Sources/App/AppMenu.swift
 run_test FinderExtensionStatusTests Sources/App/FinderExtensionStatus.swift
+run_test ApplicationSettingsTests -framework ServiceManagement Sources/App/ApplicationPresentation.swift Sources/App/ApplicationSettingsModel.swift
 run_test ToolConfigurationTests Sources/Shared/MoveRequest.swift Sources/Shared/ToolConfiguration.swift Sources/Shared/ToolCatalog.swift
 run_test ToolMenuCacheTests Sources/Shared/ToolConfiguration.swift Sources/Shared/ToolCatalog.swift Sources/Extension/ToolMenuCache.swift
 run_test MoveServiceTests Sources/Shared/ToolConfiguration.swift Sources/Shared/MoveRequest.swift Sources/App/MoveService.swift

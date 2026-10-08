@@ -45,6 +45,7 @@ swiftc \
   -framework AppKit \
   -framework CryptoKit \
   -framework FinderSync \
+  -framework ServiceManagement \
   -framework SwiftUI \
   -framework UniformTypeIdentifiers \
   -framework ApplicationServices \
@@ -58,6 +59,9 @@ swiftc \
   "$ROOT_DIR/Sources/App/MoveService.swift" \
   "$ROOT_DIR/Sources/App/MoveFeature.swift" \
   "$ROOT_DIR/Sources/App/AppMenu.swift" \
+  "$ROOT_DIR/Sources/App/ApplicationPresentation.swift" \
+  "$ROOT_DIR/Sources/App/ApplicationSettingsModel.swift" \
+  "$ROOT_DIR/Sources/App/MenuBarController.swift" \
   "$ROOT_DIR/Sources/App/NewFileFeature.swift" \
   "$ROOT_DIR/Sources/App/SettingsFeature.swift" \
   "$ROOT_DIR/Sources/App/FinderExtensionStatus.swift" \
